@@ -14,6 +14,8 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <!-- JSZip for browser zip handling -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <!-- html2pdf for direct PDF download -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
   <link rel="stylesheet" href="styles.css?v=45">
 </head>
@@ -88,9 +90,12 @@
             <button class="btn btn-outline btn-export" id="btnSaveBin" title="Download as .bin container">
               <span>.bin</span>
             </button>
-            <button class="btn btn-outline btn-export" id="btnPrintPdf" title="Print to Paper or PDF">
-              <i data-lucide="printer"></i>
+            <button class="btn btn-outline btn-export" id="btnDownloadPdf" title="Direct Download PDF Report">
+              <i data-lucide="file-down"></i>
               <span>PDF</span>
+            </button>
+            <button class="btn btn-icon btn-export" id="btnPrintReport" title="Print to Paper">
+              <i data-lucide="printer"></i>
             </button>
           </div>
         </div>

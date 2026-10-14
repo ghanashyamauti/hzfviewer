@@ -1251,49 +1251,132 @@
     }
   };
 
-  // Export Current Active Inspection (.hzf or .bin)
+  // Direct PDF Report Downloader
+  async function downloadPdfReport() {
+    showToast("Generating PDF download...");
+    renderReport();
+
+    const cleanBase = (State.fileName || 'Inspection_Report').replace(/\.[^/.]+$/, "");
+    const pdfFilename = `${cleanBase}_Report.pdf`;
+
+    const reportElem = document.getElementById('reportSheet');
+    if (!reportElem) {
+      showToast("Report sheet not found");
+      return;
+    }
+
+    if (window.html2pdf) {
+      const opt = {
+        margin: [8, 8, 8, 8],
+        filename: pdfFilename,
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 1.5, useCORS: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['css', 'legacy'] }
+      };
+
+      try {
+        await html2pdf().set(opt).from(reportElem).save();
+        showToast(`Downloaded ${pdfFilename}!`);
+        return;
+      } catch (err) {
+        console.warn("html2pdf error, using print fallback:", err);
+      }
+    }
+
+    // Fallback: switch to report tab and open print
+    document.querySelector('.nav-tab[data-tab="report"]')?.click();
+    setTimeout(() => window.print(), 250);
+  }
+
+  // Fast Export for .hzf and .bin containers
   async function exportFile(format) {
     showToast(`Generating .${format} download...`);
     syncFormToState();
+    const cleanBase = (State.fileName || 'Inspection_Report').replace(/\.[^/.]+$/, "");
+    const downloadName = `${cleanBase}.${format}`;
 
-    try {
-      const endpoint = (format === 'bin') ? '/api/export-bin' : '/api/export-hzf';
-      const cleanBase = (State.fileName || 'Inspection_Report').replace(/\.[^/.]+$/, "");
-      const resp = await fetch(apiUrl(endpoint), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: State.activeReportId,
-          fileName: `${cleanBase}.${format}`,
-          clientInfo: State.clientInfo,
-          sections: State.sections
-        })
-      });
-
-      if (resp.ok) {
-        const blob = await resp.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${cleanBase}.${format}`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        showToast(`Downloaded ${cleanBase}.${format}!`);
-        return;
-      }
-    } catch (e) {
-      console.log("Backend export error:", e);
-    }
-
-    // Client-side JSZip fallback
+    // Client-side instant zip packaging with STORE compression (no CPU freeze)
     if (window.JSZip) {
       try {
         const zip = new JSZip();
-        const cXml = `<ClientData>${Object.entries(State.clientInfo).map(([k,v])=>`<${k}>${v||''}</${k}>`).join('')}</ClientData>`;
-        zip.file("ClientInfo.xml", cXml);
 
+        // 1. ClientInfo.xml (Java XMLDecoder structure)
+        let clientXml = `<?xml version="1.0" encoding="UTF-8"?>\n<java version="1.8.0_131" class="java.beans.XMLDecoder">\n<object class="homeinspectorpro.ClientInfo">\n`;
+        const cMap = {
+          clientName: 'firstName',
+          clientPhone: 'phone',
+          clientEmail: 'email',
+          inspectionAddress: 'address',
+          inspectorName: 'inspectorName',
+          inspectionCompany: 'company',
+          inspectionDate: 'inspectionDate',
+          weather: 'weather',
+          propertyType: 'otherInfo'
+        };
+        for (const [k, prop] of Object.entries(cMap)) {
+          if (State.clientInfo[k]) {
+            clientXml += `  <void property="${prop}"><string>${State.clientInfo[k]}</string></void>\n`;
+          }
+        }
+        clientXml += `</object>\n</java>`;
+        zip.file("ClientInfo.xml", clientXml);
+
+        // 2. TabbedPanes.tpl
+        let tplXml = `<?xml version="1.0" encoding="UTF-8"?>\n<java version="1.8.0_131" class="java.beans.XMLDecoder">\n<object class="homeinspectorpro.TemplateInfo">\n`;
+        (State.sections || []).forEach(sec => {
+          tplXml += `  <void property="tabbedPaneName"><string>${sec.name}</string></void>\n`;
+        });
+        tplXml += `</object>\n</java>`;
+        zip.file("TabbedPanes.tpl", tplXml);
+
+        // 3. DamagePanels.xml
+        let dmgXml = `<?xml version="1.0" encoding="UTF-8"?>\n<java version="1.8.0_131" class="java.beans.XMLDecoder">\n`;
+        (State.sections || []).forEach(sec => {
+          (sec.items || []).forEach(it => {
+            const fullName = `${sec.name}${it.name}`;
+            dmgXml += `  <object class="homeinspectorpro.DamagePanelInfo">\n`;
+            dmgXml += `    <void property="name"><string>${fullName}</string></void>\n`;
+            if (it.status === 'Safety Hazard' || it.status === 'Defective') {
+              dmgXml += `    <void property="damageStatusRedVector"><void method="add"><string>${it.comments || it.status}</string></void></void>\n`;
+            } else if (it.status === 'Marginal') {
+              dmgXml += `    <void property="damageStatusBlackVector"><void method="add"><string>${it.comments || it.status}</string></void></void>\n`;
+            } else if (it.comments) {
+              dmgXml += `    <void property="damageStatusVector"><void method="add"><string>${it.comments}</string></void></void>\n`;
+            }
+            dmgXml += `  </object>\n`;
+          });
+        });
+        dmgXml += `</java>`;
+        zip.file("DamagePanels.xml", dmgXml);
+
+        // 4. PhotoInfo.xml & Photos
+        let photoXml = `<?xml version="1.0" encoding="UTF-8"?>\n<java version="1.8.0_131" class="java.beans.XMLDecoder">\n`;
+        const writtenPhotos = new Set();
+
+        (State.sections || []).forEach(sec => {
+          (sec.items || []).forEach(it => {
+            (it.photos || []).forEach(p => {
+              const fname = p.filename || `photo_${writtenPhotos.size + 1}.jpg`;
+              photoXml += `  <object class="homeinspectorpro.PhotoInfo">\n`;
+              photoXml += `    <void property="fileName"><string>${fname}</string></void>\n`;
+              photoXml += `    <void property="areaName"><string>${sec.name}</string></void>\n`;
+              photoXml += `    <void property="itemName"><string>${it.name}</string></void>\n`;
+              photoXml += `    <void property="caption"><string>${p.caption || ''}</string></void>\n`;
+              photoXml += `  </object>\n`;
+
+              if (p.dataUrl && !writtenPhotos.has(fname)) {
+                writtenPhotos.add(fname);
+                const base64Data = p.dataUrl.includes(',') ? p.dataUrl.split(',')[1] : p.dataUrl;
+                zip.file(fname, base64Data, { base64: true });
+              }
+            });
+          });
+        });
+        photoXml += `</java>`;
+        zip.file("PhotoInfo.xml", photoXml);
+
+        // 5. Standard InspectionData.xml for cross-compatibility
         let inspXml = `<InspectionReport created="${new Date().toISOString()}"><Sections>`;
         (State.sections || []).forEach(s => {
           inspXml += `<Section id="${s.id}" name="${s.name}"><Summary>${s.desc||s.summary||''}</Summary><Items>`;
@@ -1301,9 +1384,6 @@
             inspXml += `<Item id="${it.id}" name="${it.name}"><Status>${it.status}</Status><Comments>${it.comments||''}</Comments><Photos>`;
             (it.photos || []).forEach(p => {
               inspXml += `<Photo filename="${p.filename}" caption="${p.caption||''}"/>`;
-              if (p.dataUrl && p.dataUrl.includes(',')) {
-                zip.file(p.filename, p.dataUrl.split(',')[1], {base64: true});
-              }
             });
             inspXml += `</Photos></Item>`;
           });
@@ -1312,24 +1392,58 @@
         inspXml += `</Sections></InspectionReport>`;
         zip.file("InspectionData.xml", inspXml);
 
-        const content = await zip.generateAsync({type:"blob"});
-        const url = URL.createObjectURL(content);
+        // FAST GENERATE using STORE (instant packaging without heavy re-compression of JPEGs)
+        const blob = await zip.generateAsync({
+          type: "blob",
+          compression: "STORE"
+        });
+
+        const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        const cleanBase = (State.fileName || 'Inspection_Report').replace(/\.[^/.]+$/, "");
-        a.download = `${cleanBase}.${format}`;
+        a.download = downloadName;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        showToast(`Downloaded ${cleanBase}.${format}!`);
+        showToast(`Downloaded ${downloadName}!`);
+        return;
       } catch (err) {
-        showToast("Export failed: " + err.message);
+        console.warn("Client export warning:", err);
       }
+    }
+
+    // Backend export fallback if JSZip not available
+    try {
+      const endpoint = (format === 'bin') ? '/api/export-bin' : '/api/export-hzf';
+      const resp = await fetch(apiUrl(endpoint), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: State.activeReportId,
+          fileName: downloadName,
+          clientInfo: State.clientInfo,
+          sections: State.sections
+        })
+      });
+      if (resp.ok) {
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = downloadName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast(`Downloaded ${downloadName}!`);
+      }
+    } catch (e) {
+      showToast("Download failed: " + e.message);
     }
   }
 
-  // DOM Event Listeners
+  // DOM Event Listeners  // DOM Event Listeners
   document.addEventListener('DOMContentLoaded', () => {
 
     // Listen to browser Back / Forward history navigation
@@ -1432,10 +1546,19 @@
     document.getElementById('btnSaveToLibrary').addEventListener('click', saveActiveReport);
     document.getElementById('btnSaveHzf').addEventListener('click', () => exportFile('hzf'));
     document.getElementById('btnSaveBin').addEventListener('click', () => exportFile('bin'));
-    document.getElementById('btnPrintPdf').addEventListener('click', () => {
-      document.querySelector('.nav-tab[data-tab="report"]').click();
-      setTimeout(() => window.print(), 250);
-    });
+    const dlPdfBtn = document.getElementById('btnDownloadPdf');
+    if (dlPdfBtn) dlPdfBtn.addEventListener('click', downloadPdfReport);
+
+    const printRepBtn = document.getElementById('btnPrintReport');
+    if (printRepBtn) {
+      printRepBtn.addEventListener('click', () => {
+        document.querySelector('.nav-tab[data-tab="report"]')?.click();
+        setTimeout(() => window.print(), 250);
+      });
+    }
+
+    const printPdfOld = document.getElementById('btnPrintPdf');
+    if (printPdfOld) printPdfOld.addEventListener('click', downloadPdfReport);
 
     // Tabs Navigation
     document.querySelectorAll('.nav-tab').forEach(tab => {
