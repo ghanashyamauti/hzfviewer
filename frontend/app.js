@@ -318,25 +318,40 @@
   }
 
   // ==============================================================================
-  // CLIENT-SIDE HOME INSPECTOR PRO (.BIN & .HZF) PARSER
+  // CLIENT-SIDE HOME INSPECTOR PRO (.BIN & .HZF) PARSER (Robust DOM Level 1)
   // ==============================================================================
   function parseHipFormatJs(xmlFiles, imageMap) {
     const clientInfo = {};
     const sections = [];
 
+    // Helper: get text of child tag
+    function getChildTags(parent, tagName) {
+      const results = [];
+      const children = parent.children || parent.childNodes || [];
+      for (let i = 0; i < children.length; i++) {
+        const c = children[i];
+        if (c.nodeName && c.nodeName.toLowerCase() === tagName.toLowerCase()) {
+          results.push(c);
+        }
+      }
+      return results;
+    }
+
     // 1. ClientInfo.xml
-    const clientXmlStr = xmlFiles['ClientInfo.xml'] || xmlFiles['clientinfo.xml'];
+    const clientXmlStr = xmlFiles['clientinfo.xml'] || xmlFiles['ClientInfo.xml'] || '';
     if (clientXmlStr) {
       try {
         const dp = new DOMParser();
         const doc = dp.parseFromString(clientXmlStr, "text/xml");
         const rawProps = {};
-        doc.querySelectorAll('void').forEach(v => {
-          const prop = v.getAttribute('property');
+        const voids = doc.getElementsByTagName('void');
+        for (let i = 0; i < voids.length; i++) {
+          const v = voids[i];
+          const prop = v.getAttribute ? v.getAttribute('property') : null;
           if (prop) {
             rawProps[prop] = v.textContent.trim();
           }
-        });
+        }
 
         const addrParts = [rawProps.address, rawProps.address2, rawProps.city, rawProps.state, rawProps.zip].filter(Boolean);
         if (addrParts.length > 0) clientInfo.inspectionAddress = addrParts.join(', ');
@@ -363,53 +378,61 @@
           }
         }
       } catch(e) {
-        console.log("ClientInfo parse error:", e);
+        console.warn("ClientInfo parse error:", e);
       }
     }
 
     // 2. TabbedPanes.tpl (Systems & Rooms)
     const tabNames = [];
-    const tplStr = xmlFiles['TabbedPanes.tpl'] || xmlFiles['tabbedpanes.tpl'];
+    const tplStr = xmlFiles['tabbedpanes.tpl'] || xmlFiles['TabbedPanes.tpl'] || '';
     if (tplStr) {
       try {
         const dp = new DOMParser();
         const doc = dp.parseFromString(tplStr, "text/xml");
-        doc.querySelectorAll('void[property="tabbedPaneName"]').forEach(v => {
-          const s = v.querySelector('string');
-          const txt = s ? s.textContent.trim() : v.textContent.trim();
-          if (txt && !tabNames.includes(txt)) {
-            tabNames.push(txt);
+        const voids = doc.getElementsByTagName('void');
+        for (let i = 0; i < voids.length; i++) {
+          const v = voids[i];
+          if (v.getAttribute && v.getAttribute('property') === 'tabbedPaneName') {
+            const strings = v.getElementsByTagName('string');
+            const txt = strings.length > 0 ? strings[0].textContent.trim() : v.textContent.trim();
+            if (txt && !tabNames.includes(txt)) {
+              tabNames.push(txt);
+            }
           }
-        });
+        }
       } catch(e) {
-        console.log("TabbedPanes parse error:", e);
+        console.warn("TabbedPanes parse error:", e);
       }
     }
 
     // 3. PhotoInfo.xml
     const photosByAreaItem = {};
     let unassignedPhotos = [];
-    const photoXmlStr = xmlFiles['PhotoInfo.xml'] || xmlFiles['photoinfo.xml'];
+    const photoXmlStr = xmlFiles['photoinfo.xml'] || xmlFiles['PhotoInfo.xml'] || '';
     if (photoXmlStr) {
       try {
         const dp = new DOMParser();
         const doc = dp.parseFromString(photoXmlStr, "text/xml");
-        doc.querySelectorAll('object').forEach(pObj => {
-          if (pObj.getAttribute('class') === 'homeinspectorpro.PhotoInfo') {
+        const objects = doc.getElementsByTagName('object');
+        for (let i = 0; i < objects.length; i++) {
+          const pObj = objects[i];
+          if (pObj.getAttribute && pObj.getAttribute('class') === 'homeinspectorpro.PhotoInfo') {
             const pData = {};
-            pObj.querySelectorAll(':scope > void').forEach(v => {
+            const childVoids = getChildTags(pObj, 'void');
+            for (let j = 0; j < childVoids.length; j++) {
+              const v = childVoids[j];
               const prop = v.getAttribute('property');
               if (prop) pData[prop] = v.textContent.trim();
-            });
+            }
 
             const fname = pData.fileName || '';
-            if (!fname) return;
+            if (!fname) continue;
 
             const caption = pData.caption || '';
             const area = (pData.areaName || '').trim();
             const item = (pData.itemName || '').trim();
             const baseFname = fname.split('/').pop().split('\\').pop();
-            const dUrl = imageMap[fname] || imageMap[baseFname] || '';
+            const dUrl = imageMap[fname] || imageMap[baseFname] || imageMap[baseFname.toLowerCase()] || '';
 
             const photoRecord = { filename: fname, dataUrl: dUrl, caption: caption };
             if (area || item) {
@@ -420,49 +443,56 @@
               unassignedPhotos.push(photoRecord);
             }
           }
-        });
+        }
       } catch(e) {
-        console.log("PhotoInfo parse error:", e);
+        console.warn("PhotoInfo parse error:", e);
       }
     }
 
     // 4. DamagePanels.xml
     const panelsByAreaItem = {};
-    const damageXmlStr = xmlFiles['DamagePanels.xml'] || xmlFiles['damagepanels.xml'];
+    const damageXmlStr = xmlFiles['damagepanels.xml'] || xmlFiles['DamagePanels.xml'] || '';
     if (damageXmlStr) {
       try {
         const dp = new DOMParser();
         const doc = dp.parseFromString(damageXmlStr, "text/xml");
-        doc.querySelectorAll('object').forEach(pObj => {
-          if (pObj.getAttribute('class') === 'homeinspectorpro.DamagePanelInfo') {
+        const objects = doc.getElementsByTagName('object');
+        for (let i = 0; i < objects.length; i++) {
+          const pObj = objects[i];
+          if (pObj.getAttribute && pObj.getAttribute('class') === 'homeinspectorpro.DamagePanelInfo') {
             let pName = "";
-            let redNotes = [];
-            let blackNotes = [];
-            let generalNotes = [];
+            const redNotes = [];
+            const blackNotes = [];
+            const generalNotes = [];
 
-            pObj.querySelectorAll(':scope > void').forEach(v => {
+            const childVoids = getChildTags(pObj, 'void');
+            for (let j = 0; j < childVoids.length; j++) {
+              const v = childVoids[j];
               const prop = v.getAttribute('property');
               if (prop === 'name') {
                 pName = v.textContent.trim();
               } else if (prop === 'damageStatusRedVector') {
-                v.querySelectorAll('string').forEach(s => {
-                  const t = s.textContent.trim();
+                const strings = v.getElementsByTagName('string');
+                for (let k = 0; k < strings.length; k++) {
+                  const t = strings[k].textContent.trim();
                   if (t) redNotes.push(t);
-                });
+                }
               } else if (prop === 'damageStatusBlackVector') {
-                v.querySelectorAll('string').forEach(s => {
-                  const t = s.textContent.trim();
+                const strings = v.getElementsByTagName('string');
+                for (let k = 0; k < strings.length; k++) {
+                  const t = strings[k].textContent.trim();
                   if (t) blackNotes.push(t);
-                });
+                }
               } else if (prop === 'damageStatusVector') {
-                v.querySelectorAll('string').forEach(s => {
-                  const t = s.textContent.trim();
+                const strings = v.getElementsByTagName('string');
+                for (let k = 0; k < strings.length; k++) {
+                  const t = strings[k].textContent.trim();
                   if (t) generalNotes.push(t);
-                });
+                }
               }
-            });
+            }
 
-            if (!pName) return;
+            if (!pName) continue;
 
             let matchedTab = null;
             let matchedItem = pName;
@@ -488,42 +518,48 @@
               general: generalNotes
             };
           }
-        });
+        }
       } catch(e) {
-        console.log("DamagePanels parse error:", e);
+        console.warn("DamagePanels parse error:", e);
       }
     }
 
     // 5. SelectionPanels.xml (Materials & Specs)
     const selectionsByAreaItem = {};
-    const selXmlStr = xmlFiles['SelectionPanels.xml'] || xmlFiles['selectionpanels.xml'];
+    const selXmlStr = xmlFiles['selectionpanels.xml'] || xmlFiles['SelectionPanels.xml'] || '';
     if (selXmlStr) {
       try {
         const dp = new DOMParser();
         const doc = dp.parseFromString(selXmlStr, "text/xml");
-        doc.querySelectorAll('object').forEach(sObj => {
-          if (sObj.getAttribute('class') === 'homeinspectorpro.SelectionPanelInfo') {
+        const objects = doc.getElementsByTagName('object');
+        for (let i = 0; i < objects.length; i++) {
+          const sObj = objects[i];
+          if (sObj.getAttribute && sObj.getAttribute('class') === 'homeinspectorpro.SelectionPanelInfo') {
             let pName = "";
-            let materials = [];
-            let indices = [];
             let desc = "";
+            const materials = [];
+            const indices = [];
 
-            sObj.querySelectorAll(':scope > void').forEach(v => {
+            const childVoids = getChildTags(sObj, 'void');
+            for (let j = 0; j < childVoids.length; j++) {
+              const v = childVoids[j];
               const prop = v.getAttribute('property');
               if (prop === 'name') pName = v.textContent.trim();
               else if (prop === 'description') desc = v.textContent.trim();
               else if (prop === 'materialTypesVector') {
-                v.querySelectorAll('string').forEach(s => {
-                  const t = s.textContent.trim();
+                const strings = v.getElementsByTagName('string');
+                for (let k = 0; k < strings.length; k++) {
+                  const t = strings[k].textContent.trim();
                   if (t) materials.push(t);
-                });
+                }
               } else if (prop === 'selectedIndices') {
-                v.querySelectorAll('int').forEach(i => {
-                  const n = parseInt(i.textContent.trim(), 10);
+                const ints = v.getElementsByTagName('int');
+                for (let k = 0; k < ints.length; k++) {
+                  const n = parseInt(ints[k].textContent.trim(), 10);
                   if (!isNaN(n)) indices.push(n);
-                });
+                }
               }
-            });
+            }
 
             if (pName && indices.length > 0 && materials.length > 0) {
               const chosen = indices.map(idx => materials[idx]).filter(Boolean);
@@ -544,9 +580,9 @@
               }
             }
           }
-        });
+        }
       } catch(e) {
-        console.log("SelectionPanels parse error:", e);
+        console.warn("SelectionPanels parse error:", e);
       }
     }
 
@@ -735,14 +771,19 @@
             imageMap[baseName] = dataUrl;
             imageMap[fname] = dataUrl;
           } else if (lower.endsWith('.xml') || lower.endsWith('.tpl') || lower.endsWith('.dat')) {
-            xmlFiles[fname.split('/').pop()] = await entry.async("text");
+            const bName = fname.split('/').pop().split('\\').pop();
+            const txt = await entry.async("text");
+            xmlFiles[bName] = txt;
+            xmlFiles[bName.toLowerCase()] = txt;
+            xmlFiles[fname] = txt;
+            xmlFiles[fname.toLowerCase()] = txt;
           }
         }
 
         // Check if this is a native Home Inspector Pro archive (.bin or .hzf with TabbedPanes/DamagePanels/ClientInfo)
-        const isHipArchive = xmlFiles['TabbedPanes.tpl'] || xmlFiles['tabbedpanes.tpl'] ||
-                             xmlFiles['DamagePanels.xml'] || xmlFiles['damagepanels.xml'] ||
-                             xmlFiles['ClientInfo.xml'] || xmlFiles['clientinfo.xml'];
+        const isHipArchive = xmlFiles['tabbedpanes.tpl'] || xmlFiles['damagepanels.xml'] ||
+                             xmlFiles['clientinfo.xml'] || xmlFiles['photoinfo.xml'] ||
+                             xmlFiles['TabbedPanes.tpl'] || xmlFiles['DamagePanels.xml'];
 
         if (isHipArchive) {
           const hipParsed = parseHipFormatJs(xmlFiles, imageMap);
