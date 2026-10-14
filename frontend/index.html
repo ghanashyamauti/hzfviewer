@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HZF Studio | Home Inspection Builder & Editor</title>
+
+  <!-- Typography: Plus Jakarta Sans -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- JSZip for browser zip handling -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+  <link rel="stylesheet" href="styles.css?v=45">
+</head>
+<body>
+  <div class="app-shell">
+
+    <!-- Top Navigation Bar -->
+    <header class="top-nav">
+      <!-- Back Arrow Button (Visible during active workspace) -->
+      <button class="btn btn-outline btn-sm nav-back-btn" id="btnNavBack" style="display: none; align-items: center; gap: 0.4rem; padding: 0.35rem 0.75rem; font-weight: 600; flex-shrink: 0;" title="Back to Dashboard">
+        <i data-lucide="arrow-left" style="width: 16px; height: 16px;"></i>
+        <span>Back</span>
+      </button>
+
+      <div class="nav-brand" id="brandHomeBtn" style="cursor: pointer; display: flex; align-items: center; gap: 0.65rem; flex-shrink: 0; min-width: max-content; white-space: nowrap;" title="Back to Home Dashboard">
+        <div class="brand-icon" style="flex-shrink: 0;">
+          <i data-lucide="shield-check"></i>
+        </div>
+        <div class="brand-info" style="display: flex; flex-direction: column; justify-content: center; white-space: nowrap; line-height: 1.15;">
+          <span class="brand-title" style="white-space: nowrap; font-size: 1.05rem; font-weight: 800; letter-spacing: -0.02em;">HZF Studio</span>
+          <span class="brand-subtitle" style="white-space: nowrap; font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;">Inspection Builder</span>
+        </div>
+      </div>
+
+      <!-- Center Tabs (Visible during active inspection) -->
+      <div class="nav-center-tabs" id="navCenterTabs" style="display: none;">
+        <button class="nav-tab active" data-tab="checklist">
+          <i data-lucide="check-circle-2"></i>
+          <span>Checklist</span>
+        </button>
+        <button class="nav-tab" data-tab="property">
+          <i data-lucide="home"></i>
+          <span>Property Info</span>
+        </button>
+        <button class="nav-tab" data-tab="report">
+          <i data-lucide="file-text"></i>
+          <span>Report Preview</span>
+        </button>
+      </div>
+
+      <!-- Right Header Actions -->
+      <div class="nav-actions">
+        <input type="file" id="fileUploadInput" accept=".hzf,.bin,.zip" style="display: none;">
+        
+        <button class="btn btn-outline" id="btnOpenSavedReports" title="View previously saved reports">
+          <i data-lucide="archive"></i>
+          <span class="btn-text">Saved Reports</span>
+          <span class="badge-count" id="savedReportsCountBadge">0</span>
+        </button>
+
+        <button class="btn btn-outline btn-secondary-action" id="btnOpenExisting" title="Open .hzf or .bin file">
+          <i data-lucide="folder-open"></i>
+          <span class="btn-text">Open File</span>
+        </button>
+
+        <button class="btn btn-outline btn-secondary-action" id="btnStartNewInspection" title="Start blank inspection">
+          <i data-lucide="plus-circle"></i>
+          <span class="btn-text">New Inspection</span>
+        </button>
+
+        <!-- Save & Export Actions (Visible in active workspace) -->
+        <div class="export-dropdown-wrap" id="exportGroup" style="display: none;">
+          <button class="btn btn-primary" id="btnSaveToLibrary" title="Save report to library">
+            <i data-lucide="save"></i>
+            <span>Save</span>
+          </button>
+          <div class="export-btn-group">
+            <button class="btn btn-outline btn-export" id="btnSaveHzf" title="Download as .hzf archive">
+              <i data-lucide="download"></i>
+              <span>.hzf</span>
+            </button>
+            <button class="btn btn-outline btn-export" id="btnSaveBin" title="Download as .bin container">
+              <span>.bin</span>
+            </button>
+            <button class="btn btn-outline btn-export" id="btnPrintPdf" title="Print to Paper or PDF">
+              <i data-lucide="printer"></i>
+              <span>PDF</span>
+            </button>
+          </div>
+        </div>
+
+        <button class="btn btn-icon" id="btnThemeToggle" title="Toggle Theme">
+          <i data-lucide="moon" id="themeIcon"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- STATE 1: WELCOME SCREEN (ZERO HARDCODED DATA) -->
+    <section class="welcome-screen" id="welcomeScreen">
+      <div class="welcome-card">
+        <div class="welcome-badge">HOME INSPECTOR PRO COMPATIBLE</div>
+        <h1>HZF & BIN Inspection Studio</h1>
+        <p class="welcome-sub">
+          Build and edit inspections directly on your computer without needing the HIP desktop software.
+          Import phone photos, customize items, and save as <strong>.hzf</strong>, <strong>.bin</strong>, or <strong>PDF</strong>.
+        </p>
+
+        <div class="welcome-actions-grid">
+          
+          <!-- Open File Card -->
+          <div class="action-card" id="dropZoneCard">
+            <div class="action-icon">
+              <i data-lucide="file-up"></i>
+            </div>
+            <h3>Open Existing File</h3>
+            <p>Drag & drop your <strong>.hzf</strong> or <strong>.bin</strong> file here, or click to browse.</p>
+            <button class="btn btn-primary btn-sm" id="btnBrowseFile">Select .hzf / .bin</button>
+          </div>
+
+          <!-- Build New Card -->
+          <div class="action-card" id="newInspectionCard">
+            <div class="action-icon">
+              <i data-lucide="camera"></i>
+            </div>
+            <h3>Build New Inspection</h3>
+            <p>Start fresh from photos & notes taken on your mobile phone.</p>
+            <button class="btn btn-accent btn-sm" id="btnCreateBlank">Start Blank Inspection</button>
+          </div>
+
+        </div>
+
+        <div class="welcome-footer-hint">
+          <span>⚡ Direct .hzf & .bin compatibility</span>
+          <span>📱 Mobile photo workflow</span>
+          <span>📄 Client PDF reports</span>
+          <span>🔒 100% Offline & Private</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- STATE 2: ACTIVE INSPECTION WORKSPACE -->
+    <div id="activeWorkspace" style="display: none; flex-direction: column; flex: 1;">
+      
+      <!-- Property Summary Bar -->
+      <section class="property-hero">
+        <div class="hero-content">
+          <div class="hero-left">
+            <button class="hero-back-link" id="btnHeroBack" style="display: inline-flex; align-items: center; gap: 0.35rem; color: var(--text-muted); background: none; border: none; padding: 0; margin-bottom: 0.4rem; font-size: 0.8125rem; font-weight: 600; cursor: pointer;" title="Back to Dashboard">
+              <i data-lucide="arrow-left" style="width: 14px; height: 14px;"></i>
+              <span>Back to Dashboard</span>
+            </button>
+            <div class="file-pill" id="activeFilePill">Untitled_Inspection.hzf</div>
+            <h1 class="property-title" id="heroPropertyAddress">Inspection Property</h1>
+            <p class="property-meta" id="heroPropertyMeta">
+              Client: <strong id="metaClientName">—</strong> • Inspector: <strong id="metaInspectorName">—</strong> • Date: <strong id="metaDate">—</strong>
+            </p>
+          </div>
+
+          <!-- Defect Counters -->
+          <div class="hero-metrics">
+            <div class="metric-chip chip-hazard" title="Safety Hazards">
+              <span class="metric-count" id="countHazard">0</span>
+              <span class="metric-label">Hazard</span>
+            </div>
+            <div class="metric-chip chip-defect" title="Defective Items">
+              <span class="metric-count" id="countDefect">0</span>
+              <span class="metric-label">Defects</span>
+            </div>
+            <div class="metric-chip chip-marginal" title="Marginal Items">
+              <span class="metric-count" id="countMarginal">0</span>
+              <span class="metric-label">Marginal</span>
+            </div>
+            <div class="metric-chip chip-good" title="Satisfactory Items">
+              <span class="metric-count" id="countGood">0</span>
+              <span class="metric-label">Good</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Main Workspace -->
+      <main class="main-body">
+
+        <!-- TAB 1: Checklist & Systems -->
+        <div class="tab-panel active" id="tabChecklist">
+          
+          <!-- Left Systems Sidebar -->
+          <aside class="categories-sidebar">
+            <div class="sidebar-head">
+              <span>SYSTEMS & ROOMS</span>
+              <button class="btn-text-action" id="btnAddSectionSidebar" title="Add New Category">+ New</button>
+            </div>
+            <div class="categories-list" id="categoriesList">
+              <!-- Rendered dynamically -->
+            </div>
+          </aside>
+
+          <!-- Right Items Stream -->
+          <section class="items-work-area">
+            <div class="section-header-bar">
+              <div>
+                <h2 class="active-section-name" id="activeSectionName">Section Name</h2>
+                <p class="active-section-desc" id="activeSectionDesc">Checklist findings and observations.</p>
+              </div>
+              <div class="header-btns">
+                <button class="btn btn-outline btn-sm" id="btnOpenAddItemModal">
+                  <i data-lucide="plus"></i>
+                  <span>Add Item</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="items-stream" id="itemsStream">
+              <!-- Rendered dynamically -->
+            </div>
+          </section>
+
+        </div>
+
+        <!-- TAB 2: Property & Client Details -->
+        <div class="tab-panel" id="tabProperty" style="display: none;">
+          <div class="clean-form-container">
+            <div class="form-header">
+              <h2>Property & Client Information</h2>
+              <p>Values saved inside ClientInfo.xml in the .hzf / .bin file.</p>
+            </div>
+
+            <div class="clean-form-grid">
+              
+              <!-- Property Details -->
+              <div class="form-card">
+                <h3>Inspection Property</h3>
+                <div class="form-fields">
+                  <div class="form-field full">
+                    <label for="formAddress">Property Address</label>
+                    <input type="text" id="formAddress" class="input-clean" placeholder="e.g. 123 Maple Avenue, Springfield">
+                  </div>
+                  <div class="form-field">
+                    <label for="formPropertyType">Building Type</label>
+                    <input type="text" id="formPropertyType" class="input-clean" placeholder="e.g. Single Family Residential">
+                  </div>
+                  <div class="form-field">
+                    <label for="formYearBuilt">Year Built</label>
+                    <input type="text" id="formYearBuilt" class="input-clean" placeholder="e.g. 1998">
+                  </div>
+                  <div class="form-field">
+                    <label for="formSqFt">Square Footage</label>
+                    <input type="text" id="formSqFt" class="input-clean" placeholder="e.g. 2,400 sq ft">
+                  </div>
+                  <div class="form-field">
+                    <label for="formWeather">Weather Conditions</label>
+                    <input type="text" id="formWeather" class="input-clean" placeholder="e.g. Clear, 72°F">
+                  </div>
+                </div>
+              </div>
+
+              <!-- Client Details -->
+              <div class="form-card">
+                <h3>Client Details</h3>
+                <div class="form-fields">
+                  <div class="form-field full">
+                    <label for="formClientName">Client Full Name</label>
+                    <input type="text" id="formClientName" class="input-clean" placeholder="e.g. John Doe">
+                  </div>
+                  <div class="form-field">
+                    <label for="formClientPhone">Phone Number</label>
+                    <input type="text" id="formClientPhone" class="input-clean" placeholder="e.g. (555) 123-4567">
+                  </div>
+                  <div class="form-field">
+                    <label for="formClientEmail">Email Address</label>
+                    <input type="email" id="formClientEmail" class="input-clean" placeholder="e.g. client@example.com">
+                  </div>
+                  <div class="form-field">
+                    <label for="formInspectionDate">Inspection Date</label>
+                    <input type="date" id="formInspectionDate" class="input-clean">
+                  </div>
+                  <div class="form-field">
+                    <label for="formInspectionTime">Inspection Time</label>
+                    <input type="text" id="formInspectionTime" class="input-clean" placeholder="e.g. 09:30 AM">
+                  </div>
+                </div>
+              </div>
+
+              <!-- Inspector & Company Profile -->
+              <div class="form-card full-width">
+                <h3>Inspector & Company Profile</h3>
+                <div class="form-fields three-col">
+                  <div class="form-field">
+                    <label for="formInspectorName">Inspector Name</label>
+                    <input type="text" id="formInspectorName" class="input-clean" placeholder="e.g. Jane Inspector">
+                  </div>
+                  <div class="form-field">
+                    <label for="formInspectorLicense">License / Certification</label>
+                    <input type="text" id="formInspectorLicense" class="input-clean" placeholder="e.g. State Lic #12345 / InterNACHI">
+                  </div>
+                  <div class="form-field">
+                    <label for="formCompanyName">Inspection Company</label>
+                    <input type="text" id="formCompanyName" class="input-clean" placeholder="e.g. Precision Home Inspections">
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            <div class="form-actions">
+              <button class="btn btn-primary" id="btnSavePropertyForm">Save Information</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 3: Printable Report -->
+        <div class="tab-panel" id="tabReport" style="display: none;">
+          <div class="report-wrapper">
+            <div class="report-top-actions no-print">
+              <button class="btn btn-primary" onclick="window.print()">
+                <i data-lucide="printer"></i>
+                <span>Print Report / Save as PDF</span>
+              </button>
+            </div>
+
+            <div class="report-sheet" id="reportSheet">
+              <!-- Dynamically rendered -->
+            </div>
+          </div>
+        </div>
+
+      </main>
+
+    </div>
+
+    <!-- MODAL 1: SAVED REPORTS LIBRARY -->
+    <div class="modal-layer" id="savedReportsModal" style="display: none;">
+      <div class="modal-box modal-box-lg">
+        <div class="modal-header">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="archive" style="width: 18px; height: 18px; color: var(--accent);"></i>
+            <h3>Saved Inspection Reports</h3>
+          </div>
+          <button class="btn-close" id="btnCloseSavedReportsModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="saved-reports-list" id="savedReportsList">
+            <!-- Dynamically populated from backend -->
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="btnDismissSavedReports">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 2: Add New Item -->
+    <div class="modal-layer" id="addItemModal" style="display: none;">
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3>Add Inspection Item</h3>
+          <button class="btn-close" id="btnCloseAddItemModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-field full">
+            <label for="modalNewItemName">Item Name</label>
+            <input type="text" id="modalNewItemName" class="input-clean" placeholder="e.g. Roof Covering, Electrical Panel">
+          </div>
+          <div class="form-field full">
+            <label>Item Status</label>
+            <div class="modal-segmented-status">
+              <label><input type="radio" name="modalItemStatus" value="Satisfactory" checked><span>Good</span></label>
+              <label><input type="radio" name="modalItemStatus" value="Marginal"><span>Marginal</span></label>
+              <label><input type="radio" name="modalItemStatus" value="Defective"><span>Defect</span></label>
+              <label><input type="radio" name="modalItemStatus" value="Safety Hazard"><span>Hazard</span></label>
+            </div>
+          </div>
+          <div class="form-field full">
+            <label for="modalNewItemComments">Observations & Narrative</label>
+            <textarea id="modalNewItemComments" class="input-clean" rows="3" placeholder="Enter findings, defect notes, or recommendations..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="btnCancelAddItemModal">Cancel</button>
+          <button class="btn btn-primary" id="btnConfirmAddItem">Save Item</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 3: Add New Section -->
+    <div class="modal-layer" id="addSectionModal" style="display: none;">
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3>Add Inspection System / Room</h3>
+          <button class="btn-close" id="btnCloseAddSectionModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-field full">
+            <label for="modalNewSectionName">Section Name</label>
+            <input type="text" id="modalNewSectionName" class="input-clean" placeholder="e.g. Garage, Crawlspace, Pool & Spa, Radon">
+          </div>
+          <div class="form-field full">
+            <label for="modalNewSectionDesc">Summary / Overview</label>
+            <input type="text" id="modalNewSectionDesc" class="input-clean" placeholder="Brief summary of components inspected...">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="btnCancelAddSectionModal">Cancel</button>
+          <button class="btn btn-primary" id="btnConfirmAddSection">Create Section</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 4: Photo Lightbox & Caption -->
+    <div class="modal-layer" id="photoModal" style="display: none;">
+      <div class="modal-box modal-box-photo">
+        <div class="modal-header">
+          <h3 id="photoModalTitle">Inspection Photo</h3>
+          <button class="btn-close" id="btnClosePhotoModal">&times;</button>
+        </div>
+        <div class="modal-body photo-body">
+          <div class="photo-preview-wrap">
+            <img id="photoModalImg" src="" alt="Inspection Photo">
+          </div>
+          <div class="photo-info-wrap">
+            <div class="form-field full">
+              <label for="photoModalCaption">Photo Caption / Defect Note</label>
+              <textarea id="photoModalCaption" class="input-clean" rows="4" placeholder="Describe defect or component..."></textarea>
+            </div>
+            <button class="btn btn-danger btn-sm" id="btnDeletePhoto">Delete Photo</button>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="btnCancelPhotoModal">Close</button>
+          <button class="btn btn-primary" id="btnSavePhotoCaption">Save Caption</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toastMessage"></div>
+
+  </div>
+
+  <script src="config.js?v=26"></script>
+  <script src="app.js?v=26"></script>
+</body>
+</html>

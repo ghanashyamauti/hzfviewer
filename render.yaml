@@ -1,0 +1,16 @@
+# Render Blueprint Specification for HZF Inspector Studio Backend
+services:
+  - type: web
+    name: hzf-inspector-backend
+    runtime: docker
+    dockerfilePath: backend/Dockerfile
+    dockerContext: backend
+    plan: free
+    region: oregon
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        value: "*"
