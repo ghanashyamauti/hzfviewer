@@ -317,6 +317,370 @@
     setWorkspaceActive(true);
   }
 
+  // ==============================================================================
+  // CLIENT-SIDE HOME INSPECTOR PRO (.BIN & .HZF) PARSER
+  // ==============================================================================
+  function parseHipFormatJs(xmlFiles, imageMap) {
+    const clientInfo = {};
+    const sections = [];
+
+    // 1. ClientInfo.xml
+    const clientXmlStr = xmlFiles['ClientInfo.xml'] || xmlFiles['clientinfo.xml'];
+    if (clientXmlStr) {
+      try {
+        const dp = new DOMParser();
+        const doc = dp.parseFromString(clientXmlStr, "text/xml");
+        const rawProps = {};
+        doc.querySelectorAll('void').forEach(v => {
+          const prop = v.getAttribute('property');
+          if (prop) {
+            rawProps[prop] = v.textContent.trim();
+          }
+        });
+
+        const addrParts = [rawProps.address, rawProps.address2, rawProps.city, rawProps.state, rawProps.zip].filter(Boolean);
+        if (addrParts.length > 0) clientInfo.inspectionAddress = addrParts.join(', ');
+
+        const nameParts = [rawProps.firstName, rawProps.lastName].filter(Boolean);
+        if (nameParts.length > 0) clientInfo.clientName = nameParts.join(' ');
+
+        if (rawProps.phone) clientInfo.clientPhone = rawProps.phone;
+        if (rawProps.email) clientInfo.clientEmail = rawProps.email;
+        if (rawProps.inspectorName) clientInfo.inspectorName = rawProps.inspectorName;
+        if (rawProps.company) clientInfo.inspectionCompany = rawProps.company;
+        if (rawProps.weather) clientInfo.weather = rawProps.weather;
+        if (rawProps.otherInfo) clientInfo.propertyType = rawProps.otherInfo;
+
+        if (rawProps.inspectionDate) {
+          if (/^\d+$/.test(rawProps.inspectionDate)) {
+            try {
+              clientInfo.inspectionDate = new Date(parseInt(rawProps.inspectionDate, 10)).toISOString().split('T')[0];
+            } catch(e) {
+              clientInfo.inspectionDate = rawProps.inspectionDate;
+            }
+          } else {
+            clientInfo.inspectionDate = rawProps.inspectionDate;
+          }
+        }
+      } catch(e) {
+        console.log("ClientInfo parse error:", e);
+      }
+    }
+
+    // 2. TabbedPanes.tpl (Systems & Rooms)
+    const tabNames = [];
+    const tplStr = xmlFiles['TabbedPanes.tpl'] || xmlFiles['tabbedpanes.tpl'];
+    if (tplStr) {
+      try {
+        const dp = new DOMParser();
+        const doc = dp.parseFromString(tplStr, "text/xml");
+        doc.querySelectorAll('void[property="tabbedPaneName"]').forEach(v => {
+          const s = v.querySelector('string');
+          const txt = s ? s.textContent.trim() : v.textContent.trim();
+          if (txt && !tabNames.includes(txt)) {
+            tabNames.push(txt);
+          }
+        });
+      } catch(e) {
+        console.log("TabbedPanes parse error:", e);
+      }
+    }
+
+    // 3. PhotoInfo.xml
+    const photosByAreaItem = {};
+    let unassignedPhotos = [];
+    const photoXmlStr = xmlFiles['PhotoInfo.xml'] || xmlFiles['photoinfo.xml'];
+    if (photoXmlStr) {
+      try {
+        const dp = new DOMParser();
+        const doc = dp.parseFromString(photoXmlStr, "text/xml");
+        doc.querySelectorAll('object').forEach(pObj => {
+          if (pObj.getAttribute('class') === 'homeinspectorpro.PhotoInfo') {
+            const pData = {};
+            pObj.querySelectorAll(':scope > void').forEach(v => {
+              const prop = v.getAttribute('property');
+              if (prop) pData[prop] = v.textContent.trim();
+            });
+
+            const fname = pData.fileName || '';
+            if (!fname) return;
+
+            const caption = pData.caption || '';
+            const area = (pData.areaName || '').trim();
+            const item = (pData.itemName || '').trim();
+            const baseFname = fname.split('/').pop().split('\\').pop();
+            const dUrl = imageMap[fname] || imageMap[baseFname] || '';
+
+            const photoRecord = { filename: fname, dataUrl: dUrl, caption: caption };
+            if (area || item) {
+              const k = `${area.toLowerCase()}|${item.toLowerCase()}`;
+              if (!photosByAreaItem[k]) photosByAreaItem[k] = [];
+              photosByAreaItem[k].push(photoRecord);
+            } else {
+              unassignedPhotos.push(photoRecord);
+            }
+          }
+        });
+      } catch(e) {
+        console.log("PhotoInfo parse error:", e);
+      }
+    }
+
+    // 4. DamagePanels.xml
+    const panelsByAreaItem = {};
+    const damageXmlStr = xmlFiles['DamagePanels.xml'] || xmlFiles['damagepanels.xml'];
+    if (damageXmlStr) {
+      try {
+        const dp = new DOMParser();
+        const doc = dp.parseFromString(damageXmlStr, "text/xml");
+        doc.querySelectorAll('object').forEach(pObj => {
+          if (pObj.getAttribute('class') === 'homeinspectorpro.DamagePanelInfo') {
+            let pName = "";
+            let redNotes = [];
+            let blackNotes = [];
+            let generalNotes = [];
+
+            pObj.querySelectorAll(':scope > void').forEach(v => {
+              const prop = v.getAttribute('property');
+              if (prop === 'name') {
+                pName = v.textContent.trim();
+              } else if (prop === 'damageStatusRedVector') {
+                v.querySelectorAll('string').forEach(s => {
+                  const t = s.textContent.trim();
+                  if (t) redNotes.push(t);
+                });
+              } else if (prop === 'damageStatusBlackVector') {
+                v.querySelectorAll('string').forEach(s => {
+                  const t = s.textContent.trim();
+                  if (t) blackNotes.push(t);
+                });
+              } else if (prop === 'damageStatusVector') {
+                v.querySelectorAll('string').forEach(s => {
+                  const t = s.textContent.trim();
+                  if (t) generalNotes.push(t);
+                });
+              }
+            });
+
+            if (!pName) return;
+
+            let matchedTab = null;
+            let matchedItem = pName;
+            for (const t of tabNames) {
+              if (pName.toLowerCase().startsWith(t.toLowerCase())) {
+                matchedTab = t;
+                matchedItem = pName.substring(t.length).trim();
+                break;
+              }
+            }
+            if (!matchedTab) {
+              matchedTab = "General";
+              matchedItem = pName;
+            }
+            if (!matchedItem) matchedItem = matchedTab;
+
+            const key = `${matchedTab.toLowerCase()}|${matchedItem.toLowerCase()}`;
+            panelsByAreaItem[key] = {
+              tab: matchedTab,
+              item: matchedItem,
+              red: redNotes,
+              black: blackNotes,
+              general: generalNotes
+            };
+          }
+        });
+      } catch(e) {
+        console.log("DamagePanels parse error:", e);
+      }
+    }
+
+    // 5. SelectionPanels.xml (Materials & Specs)
+    const selectionsByAreaItem = {};
+    const selXmlStr = xmlFiles['SelectionPanels.xml'] || xmlFiles['selectionpanels.xml'];
+    if (selXmlStr) {
+      try {
+        const dp = new DOMParser();
+        const doc = dp.parseFromString(selXmlStr, "text/xml");
+        doc.querySelectorAll('object').forEach(sObj => {
+          if (sObj.getAttribute('class') === 'homeinspectorpro.SelectionPanelInfo') {
+            let pName = "";
+            let materials = [];
+            let indices = [];
+            let desc = "";
+
+            sObj.querySelectorAll(':scope > void').forEach(v => {
+              const prop = v.getAttribute('property');
+              if (prop === 'name') pName = v.textContent.trim();
+              else if (prop === 'description') desc = v.textContent.trim();
+              else if (prop === 'materialTypesVector') {
+                v.querySelectorAll('string').forEach(s => {
+                  const t = s.textContent.trim();
+                  if (t) materials.push(t);
+                });
+              } else if (prop === 'selectedIndices') {
+                v.querySelectorAll('int').forEach(i => {
+                  const n = parseInt(i.textContent.trim(), 10);
+                  if (!isNaN(n)) indices.push(n);
+                });
+              }
+            });
+
+            if (pName && indices.length > 0 && materials.length > 0) {
+              const chosen = indices.map(idx => materials[idx]).filter(Boolean);
+              if (chosen.length > 0) {
+                let matchedTab = null;
+                let matchedItem = pName;
+                for (const t of tabNames) {
+                  if (pName.toLowerCase().startsWith(t.toLowerCase())) {
+                    matchedTab = t;
+                    matchedItem = pName.substring(t.length).trim();
+                    break;
+                  }
+                }
+                if (!matchedTab) matchedTab = "General";
+                if (!matchedItem) matchedItem = desc || matchedTab;
+                const key = `${matchedTab.toLowerCase()}|${matchedItem.toLowerCase()}`;
+                selectionsByAreaItem[key] = chosen;
+              }
+            }
+          }
+        });
+      } catch(e) {
+        console.log("SelectionPanels parse error:", e);
+      }
+    }
+
+    // Tab names fallback
+    if (tabNames.length === 0) {
+      const tabSet = new Set();
+      Object.keys(panelsByAreaItem).forEach(k => tabSet.add(k.split('|')[0]));
+      Object.keys(photosByAreaItem).forEach(k => tabSet.add(k.split('|')[0]));
+      tabNames.push(...Array.from(tabSet));
+      if (tabNames.length === 0) tabNames.push("General Inspection");
+    }
+
+    // 6. Assemble Final Sections & Items
+    let secIdx = 1;
+    let itemCounter = 1;
+
+    for (const tab of tabNames) {
+      const tabLower = tab.toLowerCase();
+      const secItems = [];
+      const seenItems = new Set();
+
+      // Damage Panels
+      for (const [key, pInfo] of Object.entries(panelsByAreaItem)) {
+        const [aLow, iLow] = key.split('|');
+        if (aLow === tabLower) {
+          seenItems.add(iLow);
+          const reds = pInfo.red;
+          const blacks = pInfo.black;
+          const generals = pInfo.general;
+
+          let status = "Satisfactory";
+          if (reds.length > 0) {
+            const isHazard = reds.some(r => /hazard|danger|safety|shock|seepage|moisture|fire/i.test(r));
+            status = isHazard ? "Safety Hazard" : "Defective";
+          } else if (blacks.length > 0) {
+            status = "Marginal";
+          }
+
+          const commentBlocks = [];
+          let matSpecs = selectionsByAreaItem[key] || [];
+          if (matSpecs.length === 0) {
+            for (const [sKey, sList] of Object.entries(selectionsByAreaItem)) {
+              const [saLow, siLow] = sKey.split('|');
+              if (saLow === aLow && (siLow.includes(iLow) || iLow.includes(siLow))) {
+                matSpecs = sList;
+                break;
+              }
+            }
+          }
+          if (matSpecs.length > 0) {
+            commentBlocks.push("• Materials & Specs: " + matSpecs.join(", "));
+          }
+          if (reds.length > 0) commentBlocks.push("• " + reds.join("\n• "));
+          if (blacks.length > 0) commentBlocks.push("• " + blacks.join("\n• "));
+          if (generals.length > 0 && reds.length === 0 && blacks.length === 0) {
+            commentBlocks.push("• " + generals.join("\n• "));
+          }
+
+          let itemPhotos = photosByAreaItem[key] || [];
+          if (itemPhotos.length === 0) {
+            for (const [pKey, pList] of Object.entries(photosByAreaItem)) {
+              const [paLow, piLow] = pKey.split('|');
+              if (paLow === tabLower && (piLow.includes(iLow) || iLow.includes(piLow))) {
+                itemPhotos = pList;
+                break;
+              }
+            }
+          }
+
+          secItems.push({
+            id: `it_hip_${itemCounter++}`,
+            name: pInfo.item,
+            status: status,
+            comments: commentBlocks.join("\n\n"),
+            photos: itemPhotos
+          });
+        }
+      }
+
+      // Remaining photos in this area
+      for (const [pKey, pList] of Object.entries(photosByAreaItem)) {
+        const [paLow, piLow] = pKey.split('|');
+        if (paLow === tabLower && !seenItems.has(piLow)) {
+          seenItems.add(piLow);
+          secItems.push({
+            id: `it_hip_${itemCounter++}`,
+            name: piLow.replace(/\b\w/g, l => l.toUpperCase()) || "Inspection Photos",
+            status: "Satisfactory",
+            comments: "",
+            photos: pList
+          });
+        }
+      }
+
+      // Overview photos under details tab
+      if (/detail/i.test(tabLower) && unassignedPhotos.length > 0) {
+        secItems.push({
+          id: `it_hip_${itemCounter++}`,
+          name: "Cover & Overview Photos",
+          status: "Satisfactory",
+          comments: "Inspection overview and cover photos",
+          photos: unassignedPhotos
+        });
+        unassignedPhotos = [];
+      }
+
+      if (secItems.length > 0) {
+        sections.push({
+          id: `sec_hip_${secIdx++}`,
+          name: tab,
+          summary: `${secItems.length} inspection checkpoints in ${tab}`,
+          items: secItems
+        });
+      }
+    }
+
+    if (unassignedPhotos.length > 0) {
+      sections.push({
+        id: `sec_hip_${secIdx++}`,
+        name: "General Overview Photos",
+        summary: `${unassignedPhotos.length} unclassified inspection photos`,
+        items: [{
+          id: `it_hip_${itemCounter++}`,
+          name: "Overview Photos",
+          status: "Satisfactory",
+          comments: "",
+          photos: unassignedPhotos
+        }]
+      });
+    }
+
+    return { clientInfo, sections };
+  }
+
   // Load User's Actual .hzf or .bin File
   async function loadUserFile(file) {
     showToast(`Parsing ${file.name}...`);
@@ -375,66 +739,76 @@
           }
         }
 
-        // Parse Client Info
-        const clientXml = xmlFiles['ClientInfo.xml'] || xmlFiles['client.xml'] || Object.values(xmlFiles)[0] || '';
-        State.clientInfo = {};
-        if (clientXml) {
-          const dp = new DOMParser();
-          const doc = dp.parseFromString(clientXml, "text/xml");
-          const tags = ["clientName", "inspectionAddress", "inspectorName", "inspectionDate", "weather", "propertyType", "yearBuilt"];
-          tags.forEach(t => {
-            const el = doc.querySelector(t) || doc.querySelector(t.toLowerCase());
-            if (el) State.clientInfo[t] = el.textContent.trim();
-          });
-        }
+        // Check if this is a native Home Inspector Pro archive (.bin or .hzf with TabbedPanes/DamagePanels/ClientInfo)
+        const isHipArchive = xmlFiles['TabbedPanes.tpl'] || xmlFiles['tabbedpanes.tpl'] ||
+                             xmlFiles['DamagePanels.xml'] || xmlFiles['damagepanels.xml'] ||
+                             xmlFiles['ClientInfo.xml'] || xmlFiles['clientinfo.xml'];
 
-        // Parse Sections & Items
-        const inspXml = xmlFiles['InspectionData.xml'] || xmlFiles['report.xml'];
-        const parsedSections = [];
-
-        if (inspXml) {
-          const dp = new DOMParser();
-          const doc = dp.parseFromString(inspXml, "text/xml");
-          doc.querySelectorAll('Section').forEach((sNode, sIdx) => {
-            const sName = sNode.getAttribute('name') || sNode.querySelector('Name')?.textContent || `Section ${sIdx + 1}`;
-            const items = [];
-            sNode.querySelectorAll('Item').forEach((iNode, iIdx) => {
-              const iName = iNode.getAttribute('name') || iNode.querySelector('Name')?.textContent || `Item ${iIdx + 1}`;
-              const status = iNode.querySelector('Status')?.textContent || "Satisfactory";
-              const comments = iNode.querySelector('Comments')?.textContent || "";
-              const photos = [];
-              iNode.querySelectorAll('Photo').forEach(pNode => {
-                const pFile = pNode.getAttribute('filename') || pNode.textContent.trim();
-                const pCap = pNode.getAttribute('caption') || "";
-                if (pFile && imageMap[pFile]) {
-                  photos.push({ filename: pFile, dataUrl: imageMap[pFile], caption: pCap });
-                }
-              });
-              items.push({ id: `it_${sIdx}_${iIdx}`, name: iName, status, comments, photos });
+        if (isHipArchive) {
+          const hipParsed = parseHipFormatJs(xmlFiles, imageMap);
+          State.clientInfo = hipParsed.clientInfo || {};
+          State.sections = hipParsed.sections || [];
+        } else {
+          // Parse Generic / Standard Inspection XML
+          const clientXml = xmlFiles['ClientInfo.xml'] || xmlFiles['client.xml'] || Object.values(xmlFiles)[0] || '';
+          State.clientInfo = {};
+          if (clientXml) {
+            const dp = new DOMParser();
+            const doc = dp.parseFromString(clientXml, "text/xml");
+            const tags = ["clientName", "inspectionAddress", "inspectorName", "inspectionDate", "weather", "propertyType", "yearBuilt"];
+            tags.forEach(t => {
+              const el = doc.querySelector(t) || doc.querySelector(t.toLowerCase());
+              if (el) State.clientInfo[t] = el.textContent.trim();
             });
-            parsedSections.push({
-              id: `sec_${sIdx}`,
-              name: sName,
-              desc: sNode.querySelector('Summary')?.textContent || "",
-              items: items
-            });
-          });
-        }
-
-        State.sections = parsedSections.length > 0 ? parsedSections : [
-          {
-            id: "sec_imported",
-            name: "Imported Components",
-            desc: "Items from " + file.name,
-            items: Object.entries(imageMap).map(([k, v], idx) => ({
-              id: `it_${idx}`,
-              name: k.replace(/\.[^/.]+$/, "").replace(/_/g, " "),
-              status: "Satisfactory",
-              comments: "",
-              photos: [{ filename: k, dataUrl: v, caption: "" }]
-            }))
           }
-        ];
+
+          const inspXml = xmlFiles['InspectionData.xml'] || xmlFiles['report.xml'];
+          const parsedSections = [];
+
+          if (inspXml) {
+            const dp = new DOMParser();
+            const doc = dp.parseFromString(inspXml, "text/xml");
+            doc.querySelectorAll('Section').forEach((sNode, sIdx) => {
+              const sName = sNode.getAttribute('name') || sNode.querySelector('Name')?.textContent || `Section ${sIdx + 1}`;
+              const items = [];
+              sNode.querySelectorAll('Item').forEach((iNode, iIdx) => {
+                const iName = iNode.getAttribute('name') || iNode.querySelector('Name')?.textContent || `Item ${iIdx + 1}`;
+                const status = iNode.querySelector('Status')?.textContent || "Satisfactory";
+                const comments = iNode.querySelector('Comments')?.textContent || "";
+                const photos = [];
+                iNode.querySelectorAll('Photo').forEach(pNode => {
+                  const pFile = pNode.getAttribute('filename') || pNode.textContent.trim();
+                  const pCap = pNode.getAttribute('caption') || "";
+                  if (pFile && imageMap[pFile]) {
+                    photos.push({ filename: pFile, dataUrl: imageMap[pFile], caption: pCap });
+                  }
+                });
+                items.push({ id: `it_${sIdx}_${iIdx}`, name: iName, status, comments, photos });
+              });
+              parsedSections.push({
+                id: `sec_${sIdx}`,
+                name: sName,
+                desc: sNode.querySelector('Summary')?.textContent || "",
+                items: items
+              });
+            });
+          }
+
+          State.sections = parsedSections.length > 0 ? parsedSections : [
+            {
+              id: "sec_imported",
+              name: "Imported Components",
+              desc: "Items from " + file.name,
+              items: Object.entries(imageMap).map(([k, v], idx) => ({
+                id: `it_${idx}`,
+                name: k.replace(/\.[^/.]+$/, "").replace(/_/g, " "),
+                status: "Satisfactory",
+                comments: "",
+                photos: [{ filename: k, dataUrl: v, caption: "" }]
+              }))
+            }
+          ];
+        }
 
         State.activeSectionId = State.sections[0] ? State.sections[0].id : null;
         setWorkspaceActive(true);
