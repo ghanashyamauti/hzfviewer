@@ -17,6 +17,14 @@ from dotenv import load_dotenv
 
 from hzf_parser import parse_hzf_bytes, build_hzf_bytes, get_clean_blank_template
 from db import init_db, save_report_to_db, list_reports_from_db, get_report_from_db, delete_report_from_db
+from ai_service import (
+    is_ai_configured,
+    test_gemini_connection,
+    polish_single_item,
+    batch_polish_inspection,
+    generate_executive_summary
+)
+from qa_validator import audit_inspection
 
 # Load environment configuration
 load_dotenv()
@@ -62,6 +70,17 @@ class InspectionPayload(BaseModel):
     fileName: str = "Inspection_Report.hzf"
     clientInfo: Dict[str, Any] = {}
     sections: List[Dict[str, Any]] = []
+
+class PolishItemPayload(BaseModel):
+    sectionName: str
+    itemName: str
+    status: str
+    rawComments: str
+    photosCount: Optional[int] = 0
+
+class SetApiKeyPayload(BaseModel):
+    apiKey: str
+    model: Optional[str] = "gemini-3-flash-preview"
 
 @app.get("/api/health")
 async def health_check():
@@ -245,6 +264,83 @@ async def export_bin(payload: InspectionPayload):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate .bin: {str(e)}")
+
+# ==============================================================================
+# AUTOMATED AI & QA REVIEW ENDPOINTS
+# ==============================================================================
+
+@app.get("/api/ai/status")
+async def get_ai_status():
+    """Check if Gemini AI API is configured and operational."""
+    return await test_gemini_connection()
+
+@app.post("/api/ai/set-key")
+async def update_ai_key(payload: SetApiKeyPayload):
+    """Dynamically set or update Gemini API key in .env and runtime."""
+    key = payload.apiKey.strip()
+    model = payload.model or "gemini-3-flash-preview"
+    
+    os.environ["GEMINI_API_KEY"] = key
+    os.environ["GEMINI_MODEL"] = model
+
+    # Persist to backend/.env
+    env_file = os.path.join(os.path.dirname(__file__), ".env")
+    if os.path.exists(env_file):
+        try:
+            with open(env_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            new_lines = []
+            found_key = False
+            found_model = False
+            for line in lines:
+                if line.startswith("GEMINI_API_KEY="):
+                    new_lines.append(f"GEMINI_API_KEY={key}\n")
+                    found_key = True
+                elif line.startswith("GEMINI_MODEL="):
+                    new_lines.append(f"GEMINI_MODEL={model}\n")
+                    found_model = True
+                else:
+                    new_lines.append(line)
+            if not found_key:
+                new_lines.append(f"GEMINI_API_KEY={key}\n")
+            if not found_model:
+                new_lines.append(f"GEMINI_MODEL={model}\n")
+            with open(env_file, "w", encoding="utf-8") as f:
+                f.writelines(new_lines)
+        except Exception as e:
+            print("Failed to persist key to .env:", e)
+
+    return await test_gemini_connection()
+
+@app.post("/api/ai/polish-item")
+async def api_polish_item(payload: PolishItemPayload):
+    """Polish a single item's field notes into standard InterNACHI narrative."""
+    res = await polish_single_item(
+        section_name=payload.sectionName,
+        item_name=payload.itemName,
+        status=payload.status,
+        raw_comments=payload.rawComments,
+        photos_count=payload.photosCount or 0
+    )
+    return res
+
+@app.post("/api/ai/batch-polish")
+async def api_batch_polish(payload: InspectionPayload):
+    """Run automated narrative enhancement across all defective items in the report."""
+    res = await batch_polish_inspection(payload.dict())
+    return res
+
+@app.post("/api/ai/summary")
+async def api_executive_summary(payload: InspectionPayload):
+    """Generate structured executive summary and contractor recommendations."""
+    res = await generate_executive_summary(payload.dict())
+    return res
+
+@app.post("/api/qa/audit")
+async def api_qa_audit(payload: InspectionPayload):
+    """Perform rule-based QA audit for missing photos, omitted sections, and metadata."""
+    res = audit_inspection(payload.dict())
+    return res
 
 # Mount frontend directory
 frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))

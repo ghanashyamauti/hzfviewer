@@ -17,26 +17,28 @@
   <!-- html2pdf for direct PDF download -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
-  <link rel="stylesheet" href="styles.css?v=100">
+  <link rel="stylesheet" href="styles.css?v=104">
 </head>
 <body>
   <div class="app-shell">
 
     <!-- Top Navigation Bar -->
     <header class="top-nav">
-      <!-- Back Arrow Button (Visible during active workspace) -->
-      <button class="btn btn-outline btn-sm nav-back-btn" id="btnNavBack" style="display: none; align-items: center; gap: 0.4rem; padding: 0.35rem 0.75rem; font-weight: 600; flex-shrink: 0;" title="Back to Dashboard">
-        <i data-lucide="arrow-left" style="width: 16px; height: 16px;"></i>
-        <span>Back</span>
-      </button>
+      <div class="nav-brand-group">
+        <!-- Back Arrow Button (Visible during active workspace) -->
+        <button class="btn btn-outline btn-sm nav-back-btn" id="btnNavBack" style="display: none;" title="Back to Dashboard">
+          <i data-lucide="arrow-left"></i>
+          <span class="btn-text">Back</span>
+        </button>
 
-      <div class="nav-brand" id="brandHomeBtn" style="cursor: pointer; display: flex; align-items: center; gap: 0.65rem; flex-shrink: 0; min-width: max-content; white-space: nowrap;" title="Back to Home Dashboard">
-        <div class="brand-icon" style="flex-shrink: 0;">
-          <i data-lucide="shield-check"></i>
-        </div>
-        <div class="brand-info" style="display: flex; flex-direction: column; justify-content: center; white-space: nowrap; line-height: 1.15;">
-          <span class="brand-title" style="white-space: nowrap; font-size: 1.05rem; font-weight: 800; letter-spacing: -0.02em;">HZF Studio</span>
-          <span class="brand-subtitle" style="white-space: nowrap; font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;">Inspection Builder</span>
+        <div class="nav-brand" id="brandHomeBtn" title="Back to Home Dashboard">
+          <div class="brand-icon">
+            <i data-lucide="shield-check"></i>
+          </div>
+          <div class="brand-info">
+            <span class="brand-title">HZF Studio</span>
+            <span class="brand-subtitle">Inspection Builder</span>
+          </div>
         </div>
       </div>
 
@@ -44,15 +46,18 @@
       <div class="nav-center-tabs" id="navCenterTabs" style="display: none;">
         <button class="nav-tab active" data-tab="checklist">
           <i data-lucide="check-circle-2"></i>
-          <span>Checklist</span>
+          <span class="tab-label-full">Checklist</span>
+          <span class="tab-label-short">Checklist</span>
         </button>
         <button class="nav-tab" data-tab="property">
           <i data-lucide="home"></i>
-          <span>Property Info</span>
+          <span class="tab-label-full">Property Info</span>
+          <span class="tab-label-short">Property</span>
         </button>
         <button class="nav-tab" data-tab="report">
           <i data-lucide="file-text"></i>
-          <span>Report Preview</span>
+          <span class="tab-label-full">Report Preview</span>
+          <span class="tab-label-short">Report</span>
         </button>
       </div>
 
@@ -60,6 +65,12 @@
       <div class="nav-actions">
         <input type="file" id="fileUploadInput" accept=".hzf,.bin,.zip" style="display: none;">
         
+        <button class="btn btn-outline" id="btnAiSettings" title="Configure Gemini AI Reviewer">
+          <i data-lucide="sparkles" style="color: #6366f1;"></i>
+          <span class="btn-text">AI Assistant</span>
+          <span class="ai-status-indicator" id="aiStatusDot" title="AI Status"></span>
+        </button>
+
         <button class="btn btn-outline" id="btnOpenSavedReports" title="View previously saved reports">
           <i data-lucide="archive"></i>
           <span class="btn-text">Saved Reports</span>
@@ -80,31 +91,96 @@
         <div class="export-dropdown-wrap" id="exportGroup" style="display: none;">
           <button class="btn btn-primary" id="btnSaveToLibrary" title="Save report to library">
             <i data-lucide="save"></i>
-            <span>Save</span>
+            <span class="btn-text">Save</span>
           </button>
-          <div class="export-btn-group">
-            <button class="btn btn-outline btn-export" id="btnSaveHzf" title="Download as .hzf archive">
+          
+          <div class="export-menu-container" id="exportMenuContainer">
+            <button class="btn btn-outline btn-export-trigger" id="btnExportTrigger" title="Download report or files" type="button">
               <i data-lucide="download"></i>
-              <span>.hzf</span>
+              <span class="btn-text">Export</span>
+              <i data-lucide="chevron-down" class="chevron-icon" style="width: 14px; height: 14px;"></i>
             </button>
-            <button class="btn btn-outline btn-export" id="btnSaveBin" title="Download as .bin container">
-              <span>.bin</span>
-            </button>
-            <button class="btn btn-outline btn-export" id="btnDownloadPdf" title="Direct Download PDF Report">
-              <i data-lucide="file-down"></i>
-              <span>PDF</span>
-            </button>
-            <button class="btn btn-icon btn-export" id="btnPrintReport" title="Print to Paper">
-              <i data-lucide="printer"></i>
-            </button>
+            <div class="export-dropdown-menu" id="exportDropdownMenu">
+              <button type="button" class="dropdown-item" id="btnSaveHzf" title="Download as .hzf archive">
+                <i data-lucide="package" style="color: #2563eb;"></i>
+                <div class="dropdown-item-info">
+                  <div class="dropdown-item-title">Download .hzf</div>
+                  <div class="dropdown-item-sub">Home Inspector Pro Archive</div>
+                </div>
+              </button>
+              <button type="button" class="dropdown-item" id="btnSaveBin" title="Download as .bin container">
+                <i data-lucide="file-archive" style="color: #059669;"></i>
+                <div class="dropdown-item-info">
+                  <div class="dropdown-item-title">Download .bin</div>
+                  <div class="dropdown-item-sub">HIP Binary Container</div>
+                </div>
+              </button>
+              <button type="button" class="dropdown-item" id="btnPrintReport" title="Print to Paper">
+                <i data-lucide="printer" style="color: #64748b;"></i>
+                <div class="dropdown-item-info">
+                  <div class="dropdown-item-title">Print Report</div>
+                  <div class="dropdown-item-sub">Browser / Paper Print</div>
+                </div>
+              </button>
+            </div>
           </div>
         </div>
 
         <button class="btn btn-icon" id="btnThemeToggle" title="Toggle Theme">
           <i data-lucide="moon" id="themeIcon"></i>
         </button>
+
+        <!-- Mobile More Menu Trigger -->
+        <button class="btn btn-icon btn-nav-more" id="btnNavMore" title="More Options">
+          <i data-lucide="more-vertical"></i>
+        </button>
       </div>
     </header>
+
+    <!-- Mobile Nav Drawer Menu -->
+    <div class="mobile-nav-drawer" id="mobileNavDrawer" style="display: none;">
+      <div class="drawer-header">
+        <span>Tools & Options</span>
+        <button class="btn-drawer-close" id="btnCloseNavDrawer">&times;</button>
+      </div>
+      <div class="drawer-items">
+        <button type="button" class="drawer-item" id="btnDrawerAi">
+          <div class="drawer-item-left">
+            <i data-lucide="sparkles" style="color: #6366f1;"></i>
+            <span>Gemini AI Assistant</span>
+          </div>
+          <span class="ai-status-indicator" id="drawerAiStatusDot" title="AI Status"></span>
+        </button>
+        <button type="button" class="drawer-item" id="btnDrawerReports">
+          <div class="drawer-item-left">
+            <i data-lucide="archive" style="color: var(--accent);"></i>
+            <span>Saved Reports Library</span>
+          </div>
+          <span class="badge-count" id="drawerSavedReportsCountBadge">0</span>
+        </button>
+        <button type="button" class="drawer-item" id="btnDrawerOpen">
+          <div class="drawer-item-left">
+            <i data-lucide="folder-open"></i>
+            <span>Open Existing File (.hzf / .bin)</span>
+          </div>
+        </button>
+        <button type="button" class="drawer-item" id="btnDrawerNew">
+          <div class="drawer-item-left">
+            <i data-lucide="plus-circle"></i>
+            <span>Start Blank Inspection</span>
+          </div>
+        </button>
+        <button type="button" class="drawer-item" id="btnDrawerTheme">
+          <div class="drawer-item-left">
+            <i data-lucide="moon" id="drawerThemeIcon"></i>
+            <span id="drawerThemeText">Dark Mode</span>
+          </div>
+        </button>
+      </div>
+    </div>
+
+    <!-- Mobile Nav Backdrop Overlay -->
+    <div class="mobile-nav-backdrop" id="mobileNavBackdrop" style="display: none;"></div>
 
     <!-- STATE 1: WELCOME SCREEN (ZERO HARDCODED DATA) -->
     <section class="welcome-screen" id="welcomeScreen">
@@ -156,7 +232,7 @@
       <section class="property-hero">
         <div class="hero-content">
           <div class="hero-left">
-            <button class="hero-back-link" id="btnHeroBack" style="display: inline-flex; align-items: center; gap: 0.35rem; color: var(--text-muted); background: none; border: none; padding: 0; margin-bottom: 0.4rem; font-size: 0.8125rem; font-weight: 600; cursor: pointer;" title="Back to Dashboard">
+            <button class="hero-back-link" id="btnHeroBack" title="Back to Dashboard">
               <i data-lucide="arrow-left" style="width: 14px; height: 14px;"></i>
               <span>Back to Dashboard</span>
             </button>
@@ -185,9 +261,34 @@
               <span class="metric-count" id="countGood">0</span>
               <span class="metric-label">Good</span>
             </div>
+            <div class="metric-chip chip-qa" id="chipQaScore" style="cursor: pointer;" title="Click to view QA Compliance Audit">
+              <span class="metric-count" id="countQaScore">—</span>
+              <span class="metric-label">QA Score</span>
+            </div>
           </div>
         </div>
       </section>
+
+      <!-- Automation Action Bar for In-House Reviewers -->
+      <div class="automation-bar" id="automationBar">
+        <div class="automation-bar-actions">
+          <button class="btn btn-sm btn-primary" id="btnRunBatchPolish" title="Auto-enhance all field notes using Gemini AI">
+            <i data-lucide="sparkles"></i>
+            <span>Auto-Polish All Narratives (AI)</span>
+          </button>
+          <button class="btn btn-sm btn-outline" id="btnRunQaAudit" title="Run rule-based QA compliance audit">
+            <i data-lucide="shield-check"></i>
+            <span>Audit Report (QA)</span>
+          </button>
+          <button class="btn btn-sm btn-outline" id="btnGenerateAiSummary" title="Generate Executive Defect Summary">
+            <i data-lucide="file-check-2"></i>
+            <span>Executive Summary</span>
+          </button>
+        </div>
+        <div class="automation-bar-status" id="automationStatusText">
+          <span class="status-indicator-tag"><i data-lucide="sparkles" style="width: 13px; height: 13px;"></i> In-House AI Ready</span>
+        </div>
+      </div>
 
       <!-- Main Workspace -->
       <main class="main-body">
@@ -437,8 +538,155 @@
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-outline" id="btnCancelPhotoModal">Close</button>
-          <button class="btn btn-primary" id="btnSavePhotoCaption">Save Caption</button>
+          <button class="btn btn-outline" id="btnCancelPhotoModal">Cancel</button>
+          <button class="btn btn-primary" id="btnSavePhotoCaption">
+            <i data-lucide="save"></i>
+            <span>Save Caption</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 5: Google Gemini AI Settings -->
+    <div class="modal-layer" id="aiSettingsModal" style="display: none;">
+      <div class="modal-box">
+        <div class="modal-header">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="sparkles" style="color: #6366f1; width: 18px; height: 18px;"></i>
+            <h3>Gemini AI Configuration</h3>
+          </div>
+          <button class="btn-close" id="btnCloseAiSettingsModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="ai-help-banner">
+            <p>Use a free Google Gemini API key to automatically polish notes and audit inspections.</p>
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="link-ai-studio">
+              <i data-lucide="external-link" style="width: 14px; height: 14px;"></i>
+              <span>Get Free Gemini API Key (Google AI Studio)</span>
+            </a>
+          </div>
+
+          <div class="form-field full">
+            <label for="aiApiKeyInput">Gemini API Key</label>
+            <input type="password" id="aiApiKeyInput" class="input-clean" placeholder="Paste AIzaSy... key here">
+          </div>
+
+          <div class="form-field full">
+            <label for="aiModelSelect">Gemini Model</label>
+            <select id="aiModelSelect" class="input-clean">
+              <option value="gemini-3-flash-preview" selected>Gemini 3 Flash Preview (Verified & Active)</option>
+              <option value="gemini-flash-latest">Gemini Flash Latest</option>
+              <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+              <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+            </select>
+          </div>
+
+          <div class="ai-status-box" id="aiStatusBox">
+            <div class="ai-status-row">
+              <span class="status-dot" id="modalAiDot"></span>
+              <span id="modalAiStatusMsg">Checking connection...</span>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="btnCancelAiSettings">Cancel</button>
+          <button class="btn btn-primary" id="btnSaveAiKey">
+            <i data-lucide="save"></i>
+            <span>Test & Save Key</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 6: QA Compliance Audit Modal -->
+    <div class="modal-layer" id="qaAuditModal" style="display: none;">
+      <div class="modal-box modal-box-lg">
+        <div class="modal-header">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="shield-check" style="color: var(--accent); width: 18px; height: 18px;"></i>
+            <h3>QA Compliance & Quality Audit</h3>
+          </div>
+          <button class="btn-close" id="btnCloseQaModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="qa-scorecard-header">
+            <div class="qa-score-circle" id="qaScoreCircle">
+              <span class="qa-score-number" id="modalQaScoreNum">0</span>
+              <span class="qa-score-label">Health Score</span>
+            </div>
+            <div class="qa-summary-details">
+              <h4 id="qaVerdictTitle">Auditing inspection...</h4>
+              <p id="qaVerdictDesc">Rule-based compliance engine checking photographic evidence and standard coverage.</p>
+              <div class="qa-stats-row">
+                <span class="badge-stat stat-high" id="qaCountHigh">0 Critical</span>
+                <span class="badge-stat stat-med" id="qaCountMed">0 Warnings</span>
+                <span class="badge-stat stat-low" id="qaCountLow">0 Notices</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="qa-issues-container">
+            <h4>Audit Findings</h4>
+            <div class="qa-issues-list" id="qaIssuesList">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="btnCloseQaModalBtn">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 7: AI Batch Narrative Review & Diff Modal -->
+    <div class="modal-layer" id="aiBatchReviewModal" style="display: none;">
+      <div class="modal-box modal-box-lg">
+        <div class="modal-header">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="sparkles" style="color: #6366f1; width: 18px; height: 18px;"></i>
+            <h3>AI Pre-Edited Narratives (Review & Accept)</h3>
+          </div>
+          <button class="btn-close" id="btnCloseBatchReviewModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted" style="font-size: 0.85rem;">
+            The AI engine translated raw field notes into formal InterNACHI-standard narratives (Observation, Implication, Recommendation). Review the suggestions below:
+          </p>
+          <div class="ai-diff-stream" id="aiDiffStream">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="btnDiscardBatchReview">Discard</button>
+          <button class="btn btn-primary" id="btnAcceptAllBatchReview">
+            <i data-lucide="check-check"></i>
+            <span>Accept All Suggestions</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 8: Executive Summary Modal -->
+    <div class="modal-layer" id="aiSummaryModal" style="display: none;">
+      <div class="modal-box modal-box-lg">
+        <div class="modal-header">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="file-check-2" style="color: var(--accent); width: 18px; height: 18px;"></i>
+            <h3>Executive Defect Summary</h3>
+          </div>
+          <button class="btn-close" id="btnCloseSummaryModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div id="aiSummaryContent" class="executive-summary-content">
+            <!-- Rendered dynamically -->
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="btnCloseSummaryModalBtn">Close</button>
+          <button class="btn btn-primary" id="btnCopySummaryText">
+            <i data-lucide="copy"></i>
+            <span>Copy Summary</span>
+          </button>
         </div>
       </div>
     </div>
@@ -448,7 +696,7 @@
 
   </div>
 
-  <script src="config.js?v=100"></script>
-  <script src="app.js?v=100"></script>
+  <script src="config.js?v=104"></script>
+  <script src="app.js?v=104"></script>
 </body>
 </html>

@@ -18,9 +18,12 @@
     activePhotoTarget: null // { secId, itemId, photoIdx }
   };
 
-  // Dynamic API Base URL resolver for Vercel / Render deployment
+  // Dynamic API Base URL resolver for local dev & Vercel / Render deployment
   function apiUrl(endpoint) {
-    const base = (window.ENV && window.ENV.API_BASE_URL) || localStorage.getItem('API_BASE_URL') || '';
+    let base = (window.ENV && window.ENV.API_BASE_URL) || localStorage.getItem('API_BASE_URL') || '';
+    if (!base && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && window.location.port !== '8000' && window.location.port !== '8001') {
+      base = 'http://127.0.0.1:8000';
+    }
     if (!endpoint.startsWith('/')) endpoint = '/' + endpoint;
     return base ? `${base.replace(/\/+$/, '')}${endpoint}` : endpoint;
   }
@@ -50,6 +53,14 @@
     if (navTabs) navTabs.style.display = active ? 'flex' : 'none';
     if (exportGrp) exportGrp.style.display = active ? 'flex' : 'none';
     if (navBack) navBack.style.display = active ? 'inline-flex' : 'none';
+
+    // Auto-dismiss open export menus and mobile drawer on state changes
+    const exportContainer = document.getElementById('exportMenuContainer');
+    if (exportContainer) exportContainer.classList.remove('open');
+    const mobileDrawer = document.getElementById('mobileNavDrawer');
+    if (mobileDrawer) mobileDrawer.style.display = 'none';
+    const mobileBackdrop = document.getElementById('mobileNavBackdrop');
+    if (mobileBackdrop) mobileBackdrop.style.display = 'none';
 
     if (active) {
       if (pushState) {
@@ -88,6 +99,8 @@
         if (json.success && json.reports) {
           const badge = document.getElementById('savedReportsCountBadge');
           if (badge) badge.textContent = json.reports.length;
+          const dBadge = document.getElementById('drawerSavedReportsCountBadge');
+          if (dBadge) dBadge.textContent = json.reports.length;
         }
       }
     } catch (e) {
@@ -317,6 +330,20 @@
     setWorkspaceActive(true);
   }
 
+  // Helper to sanitize XML strings from Java XMLDecoder (HIP) and generic inspection archives
+  function sanitizeXmlString(str) {
+    if (!str) return '';
+    let text = str.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
+    text = text.replace(/<string>([\s\S]*?)<\/string>/g, (m, inner) => {
+      inner = inner.replace(/&(?!(?:amp|lt|gt|apos|quot);)/g, '&amp;');
+      inner = inner.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return `<string>${inner}</string>`;
+    });
+    text = text.replace(/&(?!(?:amp|lt|gt|apos|quot);)/g, '&amp;');
+    text = text.replace(/<<([^>]+)>>/g, '&lt;&lt;$1&gt;&gt;');
+    return text;
+  }
+
   // ==============================================================================
   // CLIENT-SIDE HOME INSPECTOR PRO (.BIN & .HZF) PARSER (Robust DOM Level 1)
   // ==============================================================================
@@ -342,7 +369,7 @@
     if (clientXmlStr) {
       try {
         const dp = new DOMParser();
-        const doc = dp.parseFromString(clientXmlStr, "text/xml");
+        const doc = dp.parseFromString(sanitizeXmlString(clientXmlStr), "text/xml");
         const rawProps = {};
         const voids = doc.getElementsByTagName('void');
         for (let i = 0; i < voids.length; i++) {
@@ -388,7 +415,7 @@
     if (tplStr) {
       try {
         const dp = new DOMParser();
-        const doc = dp.parseFromString(tplStr, "text/xml");
+        const doc = dp.parseFromString(sanitizeXmlString(tplStr), "text/xml");
         const voids = doc.getElementsByTagName('void');
         for (let i = 0; i < voids.length; i++) {
           const v = voids[i];
@@ -412,7 +439,7 @@
     if (photoXmlStr) {
       try {
         const dp = new DOMParser();
-        const doc = dp.parseFromString(photoXmlStr, "text/xml");
+        const doc = dp.parseFromString(sanitizeXmlString(photoXmlStr), "text/xml");
         const objects = doc.getElementsByTagName('object');
         for (let i = 0; i < objects.length; i++) {
           const pObj = objects[i];
@@ -455,7 +482,7 @@
     if (damageXmlStr) {
       try {
         const dp = new DOMParser();
-        const doc = dp.parseFromString(damageXmlStr, "text/xml");
+        const doc = dp.parseFromString(sanitizeXmlString(damageXmlStr), "text/xml");
         const objects = doc.getElementsByTagName('object');
         for (let i = 0; i < objects.length; i++) {
           const pObj = objects[i];
@@ -530,7 +557,7 @@
     if (selXmlStr) {
       try {
         const dp = new DOMParser();
-        const doc = dp.parseFromString(selXmlStr, "text/xml");
+        const doc = dp.parseFromString(sanitizeXmlString(selXmlStr), "text/xml");
         const objects = doc.getElementsByTagName('object');
         for (let i = 0; i < objects.length; i++) {
           const sObj = objects[i];
@@ -795,7 +822,7 @@
           State.clientInfo = {};
           if (clientXml) {
             const dp = new DOMParser();
-            const doc = dp.parseFromString(clientXml, "text/xml");
+            const doc = dp.parseFromString(sanitizeXmlString(clientXml), "text/xml");
             const tags = ["clientName", "inspectionAddress", "inspectorName", "inspectionDate", "weather", "propertyType", "yearBuilt"];
             tags.forEach(t => {
               const el = doc.querySelector(t) || doc.querySelector(t.toLowerCase());
@@ -808,7 +835,7 @@
 
           if (inspXml) {
             const dp = new DOMParser();
-            const doc = dp.parseFromString(inspXml, "text/xml");
+            const doc = dp.parseFromString(sanitizeXmlString(inspXml), "text/xml");
             doc.querySelectorAll('Section').forEach((sNode, sIdx) => {
               const sName = sNode.getAttribute('name') || sNode.querySelector('Name')?.textContent || `Section ${sIdx + 1}`;
               const items = [];
@@ -1013,7 +1040,14 @@
         </div>
 
         <div class="item-notes-wrap">
-          <textarea class="clean-textarea" 
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+            <label style="font-size: 0.72rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted);">Observations & Narrative</label>
+            <button type="button" class="btn-polish-item" onclick="window.App.polishItem('${sec.id}', '${item.id}')" title="AI Polish this field note">
+              <i data-lucide="sparkles" style="width: 12px; height: 12px;"></i>
+              <span>AI Polish</span>
+            </button>
+          </div>
+          <textarea class="clean-textarea" id="notes_${item.id}"
             placeholder="Add inspector notes, defect findings, or repair recommendations..."
             onchange="window.App.setComments('${sec.id}', '${item.id}', this.value)">${item.comments || ''}</textarea>
         </div>
@@ -1289,16 +1323,364 @@
       } catch (e) {
         showToast("Error: " + e.message);
       }
+    },
+
+    // Polish a single item's field note using Gemini AI
+    polishItem: async function (secId, itemId) {
+      const sec = State.sections.find(s => s.id === secId);
+      const it = sec?.items.find(i => i.id === itemId);
+      if (!it) return;
+
+      const raw = (it.comments || '').trim();
+      if (!raw) {
+        showToast("Please enter an inspector observation first.");
+        return;
+      }
+
+      showToast("✨ AI polishing narrative...");
+      try {
+        const resp = await fetch(apiUrl('/api/ai/polish-item'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sectionName: sec.name,
+            itemName: it.name,
+            status: it.status,
+            rawComments: raw,
+            photosCount: (it.photos || []).length
+          })
+        });
+
+        if (resp.ok) {
+          const res = await resp.json();
+          if (res.success && res.polished) {
+            it.comments = res.polished;
+            if (res.recommendedStatus) it.status = res.recommendedStatus;
+            renderItems();
+            updateMetrics();
+            renderReport();
+            showToast("✨ Narrative polished with InterNACHI standards!");
+            return;
+          } else if (res.error) {
+            showToast(res.error);
+            return;
+          }
+        }
+        showToast("AI response received but could not format.");
+      } catch (err) {
+        showToast("AI Polish error: " + err.message);
+      }
+    },
+
+    // Jump directly to an item from the QA audit scorecard
+    jumpToItem: function (secId, itemId) {
+      if (secId) {
+        State.activeSectionId = secId;
+        renderSidebar();
+        renderItems();
+      }
+      const modal = document.getElementById('qaAuditModal');
+      if (modal) modal.style.display = 'none';
+
+      setTimeout(() => {
+        const el = document.getElementById(`notes_${itemId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.focus();
+          el.style.borderColor = '#6366f1';
+          el.style.boxShadow = '0 0 10px rgba(99, 102, 241, 0.4)';
+          setTimeout(() => {
+            el.style.borderColor = '';
+            el.style.boxShadow = '';
+          }, 2000);
+        }
+      }, 150);
     }
   };
 
+  // Cached suggestions for batch narrative review
+  let currentBatchSuggestions = {};
+
+  // Check Gemini AI Status
+  async function checkAiConnection() {
+    const dot = document.getElementById('aiStatusDot');
+    const drawerDot = document.getElementById('drawerAiStatusDot');
+    const modalDot = document.getElementById('modalAiDot');
+    const modalMsg = document.getElementById('modalAiStatusMsg');
+
+    try {
+      const resp = await fetch(apiUrl('/api/ai/status'));
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.success && data.configured) {
+          if (dot) {
+            dot.className = 'ai-status-indicator connected';
+            dot.title = `Gemini AI Connected (${data.model || 'Flash'})`;
+          }
+          if (drawerDot) {
+            drawerDot.className = 'ai-status-indicator connected';
+            drawerDot.title = `Gemini AI Connected (${data.model || 'Flash'})`;
+          }
+          if (modalDot) modalDot.className = 'status-dot connected';
+          if (modalMsg) modalMsg.textContent = `Connected to Google Gemini AI (${data.model || 'Flash'})`;
+          return true;
+        } else {
+          if (dot) {
+            dot.className = 'ai-status-indicator';
+            dot.title = 'Gemini API Key Needed';
+          }
+          if (drawerDot) {
+            drawerDot.className = 'ai-status-indicator';
+            drawerDot.title = 'Gemini API Key Needed';
+          }
+          if (modalDot) modalDot.className = 'status-dot error';
+          if (modalMsg) modalMsg.textContent = data.message || 'API key not configured in .env';
+          return false;
+        }
+      }
+    } catch (e) {
+      if (dot) dot.className = 'ai-status-indicator';
+      if (drawerDot) drawerDot.className = 'ai-status-indicator';
+      if (modalMsg) modalMsg.textContent = 'Backend offline or unreachable';
+    }
+    return false;
+  }
+
+  // Run QA Compliance Audit
+  async function runQaAudit() {
+    syncFormToState();
+    showToast("🛡️ Running QA Compliance Audit...");
+
+    try {
+      const resp = await fetch(apiUrl('/api/qa/audit'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: State.activeReportId,
+          fileName: State.fileName,
+          clientInfo: State.clientInfo,
+          sections: State.sections
+        })
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.success) {
+          // Update Score Chip in Hero
+          const chipScore = document.getElementById('countQaScore');
+          if (chipScore) chipScore.textContent = `${data.qaScore}%`;
+
+          // Populate QA Modal
+          const modalScoreNum = document.getElementById('modalQaScoreNum');
+          if (modalScoreNum) modalScoreNum.textContent = data.qaScore;
+
+          const titleEl = document.getElementById('qaVerdictTitle');
+          const descEl = document.getElementById('qaVerdictDesc');
+          if (data.isApproved) {
+            if (titleEl) titleEl.textContent = "✅ Report Compliant & Ready";
+            if (descEl) descEl.textContent = "No critical omissions or missing photographic evidence detected.";
+          } else {
+            if (titleEl) titleEl.textContent = "⚠️ Review Action Items Required";
+            if (descEl) descEl.textContent = "Address the flagged items below before issuing the final client report.";
+          }
+
+          const stats = data.statistics || {};
+          document.getElementById('qaCountHigh').textContent = `${stats.highIssues || 0} Critical`;
+          document.getElementById('qaCountMed').textContent = `${stats.mediumIssues || 0} Warnings`;
+          document.getElementById('qaCountLow').textContent = `${stats.lowIssues || 0} Notices`;
+
+          const listEl = document.getElementById('qaIssuesList');
+          if (listEl) {
+            listEl.innerHTML = '';
+            if (!data.issues || data.issues.length === 0) {
+              listEl.innerHTML = `<div style="text-align: center; padding: 1.5rem; color: #10b981; font-weight: 600;">🎉 Perfect score! No audit issues found.</div>`;
+            } else {
+              data.issues.forEach(iss => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = `qa-issue-item ${iss.severity}`;
+                itemDiv.innerHTML = `
+                  <div class="qa-issue-content">
+                    <h5>${iss.title}</h5>
+                    <p>${iss.message}</p>
+                  </div>
+                  ${iss.itemId ? `<button class="btn btn-outline btn-sm" onclick="window.App.jumpToItem('${iss.sectionId}', '${iss.itemId}')">Jump to Item</button>` : ''}
+                `;
+                listEl.appendChild(itemDiv);
+              });
+            }
+          }
+
+          document.getElementById('qaAuditModal').style.display = 'flex';
+          return;
+        }
+      }
+      showToast("QA audit failed to complete.");
+    } catch (err) {
+      showToast("QA error: " + err.message);
+    }
+  }
+
+  // Run Batch Narrative Polish
+  async function runBatchPolish() {
+    syncFormToState();
+    showToast("✨ AI expanding & polishing field notes...");
+
+    try {
+      const resp = await fetch(apiUrl('/api/ai/batch-polish'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: State.activeReportId,
+          fileName: State.fileName,
+          clientInfo: State.clientInfo,
+          sections: State.sections
+        })
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.success) {
+          if (!data.results || Object.keys(data.results).length === 0) {
+            showToast(data.message || "No items needed polishing.");
+            return;
+          }
+
+          currentBatchSuggestions = data.results;
+          const stream = document.getElementById('aiDiffStream');
+          if (stream) {
+            stream.innerHTML = '';
+
+            for (const sec of State.sections) {
+              for (const it of (sec.items || [])) {
+                const sug = currentBatchSuggestions[it.id];
+                if (sug) {
+                  const card = document.createElement('div');
+                  card.className = 'ai-diff-card';
+                  card.innerHTML = `
+                    <div class="ai-diff-header">
+                      <span>${sec.name} &bull; ${it.name}</span>
+                      <div class="diff-tags">
+                        <span class="badge-stat stat-low">${sug.trade || 'General'}</span>
+                        <span class="badge-stat stat-high">${sug.recommendedStatus || it.status}</span>
+                      </div>
+                    </div>
+                    <div class="ai-diff-grid">
+                      <div class="diff-col">
+                        <label>Original Mobile Field Note</label>
+                        <div class="diff-box original">${it.comments || '<i>(No notes)</i>'}</div>
+                      </div>
+                      <div class="diff-col">
+                        <label>AI Enhanced Narrative (InterNACHI)</label>
+                        <div class="diff-box polished">${sug.polishedComments}</div>
+                      </div>
+                    </div>
+                  `;
+                  stream.appendChild(card);
+                }
+              }
+            }
+          }
+
+          document.getElementById('aiBatchReviewModal').style.display = 'flex';
+          return;
+        } else if (data.error) {
+          showToast(data.error);
+          return;
+        }
+      }
+      showToast("Could not complete AI batch polish.");
+    } catch (err) {
+      showToast("AI batch error: " + err.message);
+    }
+  }
+
+  // Generate Executive Summary
+  async function runExecutiveSummary() {
+    syncFormToState();
+    showToast("📋 Generating Executive Defect Summary...");
+
+    try {
+      const resp = await fetch(apiUrl('/api/ai/summary'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: State.activeReportId,
+          fileName: State.fileName,
+          clientInfo: State.clientInfo,
+          sections: State.sections
+        })
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.success && data.summary) {
+          const s = data.summary;
+          const container = document.getElementById('aiSummaryContent');
+          if (container) {
+            container.innerHTML = `
+              <div class="summary-section-box">
+                <h4><i data-lucide="info" style="color: var(--accent); width: 16px; height: 16px;"></i> Overall Property Assessment</h4>
+                <p style="font-size: 0.9rem; line-height: 1.5; color: var(--text-main);">${s.overallAssessment || 'No overview generated.'}</p>
+              </div>
+
+              <div class="summary-section-box" style="border-left: 4px solid var(--hazard-color);">
+                <h4 style="color: var(--hazard-color);"><i data-lucide="alert-triangle" style="width: 16px; height: 16px;"></i> Immediate Safety Concerns</h4>
+                <ul>
+                  ${(s.immediateSafetyHazards || []).map(h => `<li>${h}</li>`).join('') || '<li>None identified.</li>'}
+                </ul>
+              </div>
+
+              <div class="summary-section-box" style="border-left: 4px solid var(--defect-color);">
+                <h4 style="color: var(--defect-color);"><i data-lucide="alert-circle" style="width: 16px; height: 16px;"></i> Major Deficiencies & Repairs</h4>
+                <ul>
+                  ${(s.majorDefects || []).map(d => `<li>${d}</li>`).join('') || '<li>None identified.</li>'}
+                </ul>
+              </div>
+
+              <div class="summary-section-box">
+                <h4><i data-lucide="wrench" style="color: #6366f1; width: 16px; height: 16px;"></i> Recommended Professional Trades</h4>
+                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.4rem;">
+                  ${(s.recommendedContractors || []).map(c => `<span class="badge-stat stat-low" style="background:#eef2ff; color:#4338ca; border-color:#c7d2fe;">${c}</span>`).join('')}
+                </div>
+              </div>
+            `;
+            if (window.lucide) lucide.createIcons();
+          }
+
+          document.getElementById('aiSummaryModal').style.display = 'flex';
+          return;
+        } else if (data.error) {
+          showToast(data.error);
+          return;
+        }
+      }
+      showToast("Failed to generate summary.");
+    } catch (err) {
+      showToast("Summary error: " + err.message);
+    }
+  }
+
   // Direct PDF Report Downloader
   async function downloadPdfReport() {
-    showToast("Generating PDF download...");
-    renderReport();
+    showToast("Preparing PDF report...");
+    syncFormToState();
 
-    const cleanBase = (State.fileName || 'Inspection_Report').replace(/\.[^/.]+$/, "");
-    const pdfFilename = `${cleanBase}_Report.pdf`;
+    // 1. Remember user's current active tab so we can restore it seamlessly
+    const currentActiveTab = document.querySelector('.nav-tab.active')?.getAttribute('data-tab') || 'checklist';
+    const tabReport = document.getElementById('tabReport');
+    const tabChecklist = document.getElementById('tabChecklist');
+    const tabProperty = document.getElementById('tabProperty');
+
+    // 2. Temporarily switch to the Report Preview tab so all CSS layout, table widths, and dimensions are fully computed
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+    document.querySelector('.nav-tab[data-tab="report"]')?.classList.add('active');
+
+    if (tabChecklist) tabChecklist.style.display = 'none';
+    if (tabProperty) tabProperty.style.display = 'none';
+    if (tabReport) tabReport.style.display = 'block';
+
+    // 3. Render the fresh report sheet
+    renderReport();
 
     const reportElem = document.getElementById('reportSheet');
     if (!reportElem) {
@@ -1306,28 +1688,58 @@
       return;
     }
 
+    // 4. Wait for DOM paint and images to decode
+    await new Promise(r => setTimeout(r, 400));
+
+    // Ensure report element has visible dimensions
+    if (reportElem.offsetHeight === 0) {
+      reportElem.style.display = 'block';
+      reportElem.style.visibility = 'visible';
+    }
+
+    const cleanBase = (State.fileName || 'Inspection_Report').replace(/\.[^/.]+$/, "");
+    const pdfFilename = `${cleanBase}_Report.pdf`;
+
     if (window.html2pdf) {
+      showToast("Rendering PDF document...");
+      // Dynamically calculate scale so the rendered canvas NEVER exceeds browser's 65,535px maximum limit
+      const elemHeight = Math.max(reportElem.scrollHeight, reportElem.offsetHeight, 1000);
+      const safeScale = Math.min(1.8, Math.max(1.0, 48000 / elemHeight));
+
       const opt = {
-        margin: [8, 8, 8, 8],
+        margin: [10, 10, 10, 10],
         filename: pdfFilename,
         image: { type: 'jpeg', quality: 0.95 },
-        html2canvas: { scale: 1.5, useCORS: true },
+        html2canvas: {
+          scale: safeScale,
+          useCORS: true,
+          logging: false,
+          backgroundColor: '#ffffff'
+        },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
         pagebreak: { mode: ['css', 'legacy'] }
       };
 
       try {
         await html2pdf().set(opt).from(reportElem).save();
-        showToast(`Downloaded ${pdfFilename}!`);
+        showToast(`✅ Downloaded ${pdfFilename}!`);
+
+        // If user was on another tab, restore it after a short delay
+        if (currentActiveTab !== 'report') {
+          setTimeout(() => {
+            const prevTabBtn = document.querySelector(`.nav-tab[data-tab="${currentActiveTab}"]`);
+            if (prevTabBtn) prevTabBtn.click();
+          }, 800);
+        }
         return;
       } catch (err) {
-        console.warn("html2pdf error, using print fallback:", err);
+        console.warn("Direct html2pdf export failed, switching to native vector print fallback:", err);
       }
     }
 
-    // Fallback: switch to report tab and open print
-    document.querySelector('.nav-tab[data-tab="report"]')?.click();
-    setTimeout(() => window.print(), 250);
+    // High-fidelity fallback: Browser native vector print to PDF
+    showToast("Opening Print / Save as PDF dialog...");
+    setTimeout(() => window.print(), 300);
   }
 
   // Fast Export for .hzf and .bin containers
@@ -1540,13 +1952,13 @@
 
     // Open Existing File Triggers
     const fileInput = document.getElementById('fileUploadInput');
-    document.getElementById('btnBrowseFile').addEventListener('click', () => fileInput.click());
-    document.getElementById('btnOpenExisting').addEventListener('click', () => fileInput.click());
-    document.getElementById('dropZoneCard').addEventListener('click', (e) => {
-      if (e.target.tagName !== 'BUTTON') fileInput.click();
+    document.getElementById('btnBrowseFile')?.addEventListener('click', () => fileInput?.click());
+    document.getElementById('btnOpenExisting')?.addEventListener('click', () => fileInput?.click());
+    document.getElementById('dropZoneCard')?.addEventListener('click', (e) => {
+      if (e.target.tagName !== 'BUTTON') fileInput?.click();
     });
 
-    fileInput.addEventListener('change', (e) => {
+    fileInput?.addEventListener('change', (e) => {
       if (e.target.files && e.target.files[0]) {
         loadUserFile(e.target.files[0]);
       }
@@ -1554,41 +1966,41 @@
 
     // Drag and Drop on Welcome Screen
     const dropCard = document.getElementById('dropZoneCard');
-    ['dragenter', 'dragover'].forEach(evt => {
-      dropCard.addEventListener(evt, (e) => {
-        e.preventDefault();
-        dropCard.style.borderColor = 'var(--accent)';
+    if (dropCard) {
+      ['dragenter', 'dragover'].forEach(evt => {
+        dropCard.addEventListener(evt, (e) => {
+          e.preventDefault();
+          dropCard.style.borderColor = 'var(--accent)';
+        });
       });
-    });
 
-    ['dragleave', 'drop'].forEach(evt => {
-      dropCard.addEventListener(evt, (e) => {
-        e.preventDefault();
-        dropCard.style.borderColor = '';
+      ['dragleave', 'drop'].forEach(evt => {
+        dropCard.addEventListener(evt, (e) => {
+          e.preventDefault();
+          dropCard.style.borderColor = '';
+        });
       });
-    });
 
-    dropCard.addEventListener('drop', (e) => {
-      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
-        loadUserFile(e.dataTransfer.files[0]);
-      }
-    });
+      dropCard.addEventListener('drop', (e) => {
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+          loadUserFile(e.dataTransfer.files[0]);
+        }
+      });
+    }
 
     // Saved Reports Modal
     const savedModal = document.getElementById('savedReportsModal');
-    document.getElementById('btnOpenSavedReports').addEventListener('click', () => {
+    document.getElementById('btnOpenSavedReports')?.addEventListener('click', () => {
       loadSavedReportsModal();
-      savedModal.style.display = 'flex';
+      if (savedModal) savedModal.style.display = 'flex';
     });
-    document.getElementById('btnCloseSavedReportsModal').addEventListener('click', () => savedModal.style.display = 'none');
-    document.getElementById('btnDismissSavedReports').addEventListener('click', () => savedModal.style.display = 'none');
+    document.getElementById('btnCloseSavedReportsModal')?.addEventListener('click', () => { if (savedModal) savedModal.style.display = 'none'; });
+    document.getElementById('btnDismissSavedReports')?.addEventListener('click', () => { if (savedModal) savedModal.style.display = 'none'; });
 
     // Save and Export Triggers
-    document.getElementById('btnSaveToLibrary').addEventListener('click', saveActiveReport);
-    document.getElementById('btnSaveHzf').addEventListener('click', () => exportFile('hzf'));
-    document.getElementById('btnSaveBin').addEventListener('click', () => exportFile('bin'));
-    const dlPdfBtn = document.getElementById('btnDownloadPdf');
-    if (dlPdfBtn) dlPdfBtn.addEventListener('click', downloadPdfReport);
+    document.getElementById('btnSaveToLibrary')?.addEventListener('click', saveActiveReport);
+    document.getElementById('btnSaveHzf')?.addEventListener('click', () => exportFile('hzf'));
+    document.getElementById('btnSaveBin')?.addEventListener('click', () => exportFile('bin'));
 
     const printRepBtn = document.getElementById('btnPrintReport');
     if (printRepBtn) {
@@ -1601,6 +2013,91 @@
     const printPdfOld = document.getElementById('btnPrintPdf');
     if (printPdfOld) printPdfOld.addEventListener('click', downloadPdfReport);
 
+    // Export Dropdown Menu Trigger
+    const exportContainer = document.getElementById('exportMenuContainer');
+    const exportTrigger = document.getElementById('btnExportTrigger');
+    if (exportTrigger && exportContainer) {
+      exportTrigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        exportContainer.classList.toggle('open');
+      });
+    }
+
+    // Dismiss export dropdown when selecting an export action
+    document.querySelectorAll('#exportDropdownMenu .dropdown-item').forEach(item => {
+      item.addEventListener('click', () => {
+        if (exportContainer) exportContainer.classList.remove('open');
+      });
+    });
+
+    // Mobile Navigation Drawer and Backdrop Handlers
+    const mobileDrawer = document.getElementById('mobileNavDrawer');
+    const mobileBackdrop = document.getElementById('mobileNavBackdrop');
+    const btnNavMore = document.getElementById('btnNavMore');
+    const btnCloseDrawer = document.getElementById('btnCloseNavDrawer');
+
+    function toggleMobileDrawer(open) {
+      if (!mobileDrawer) return;
+      const isOpen = (typeof open === 'boolean') ? open : (mobileDrawer.style.display !== 'flex');
+      mobileDrawer.style.display = isOpen ? 'flex' : 'none';
+      if (mobileBackdrop) mobileBackdrop.style.display = isOpen ? 'block' : 'none';
+      if (isOpen && window.lucide) lucide.createIcons();
+    }
+
+    if (btnNavMore) {
+      btnNavMore.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleMobileDrawer();
+      });
+    }
+
+    if (btnCloseDrawer) {
+      btnCloseDrawer.addEventListener('click', () => {
+        toggleMobileDrawer(false);
+      });
+    }
+
+    if (mobileBackdrop) {
+      mobileBackdrop.addEventListener('click', () => {
+        toggleMobileDrawer(false);
+      });
+    }
+
+    // Dismiss dropdowns on clicks outside
+    document.addEventListener('click', (e) => {
+      if (exportContainer && !exportContainer.contains(e.target)) {
+        exportContainer.classList.remove('open');
+      }
+      if (mobileDrawer && mobileDrawer.style.display === 'flex' && !mobileDrawer.contains(e.target) && (!btnNavMore || !btnNavMore.contains(e.target))) {
+        toggleMobileDrawer(false);
+      }
+    });
+
+    // Mobile Drawer Item Proxies to Core Actions
+    document.getElementById('btnDrawerAi')?.addEventListener('click', () => {
+      toggleMobileDrawer(false);
+      document.getElementById('btnAiSettings')?.click();
+    });
+
+    document.getElementById('btnDrawerReports')?.addEventListener('click', () => {
+      toggleMobileDrawer(false);
+      document.getElementById('btnOpenSavedReports')?.click();
+    });
+
+    document.getElementById('btnDrawerOpen')?.addEventListener('click', () => {
+      toggleMobileDrawer(false);
+      document.getElementById('btnOpenExisting')?.click();
+    });
+
+    document.getElementById('btnDrawerNew')?.addEventListener('click', () => {
+      toggleMobileDrawer(false);
+      document.getElementById('btnStartNewInspection')?.click();
+    });
+
+    document.getElementById('btnDrawerTheme')?.addEventListener('click', () => {
+      document.getElementById('btnThemeToggle')?.click();
+    });
+
     // Tabs Navigation
     document.querySelectorAll('.nav-tab').forEach(tab => {
       tab.addEventListener('click', () => {
@@ -1608,9 +2105,12 @@
         tab.classList.add('active');
         const target = tab.getAttribute('data-tab');
 
-        document.getElementById('tabChecklist').style.display = (target === 'checklist') ? 'flex' : 'none';
-        document.getElementById('tabProperty').style.display = (target === 'property') ? 'block' : 'none';
-        document.getElementById('tabReport').style.display = (target === 'report') ? 'block' : 'none';
+        const tabC = document.getElementById('tabChecklist');
+        const tabP = document.getElementById('tabProperty');
+        const tabR = document.getElementById('tabReport');
+        if (tabC) tabC.style.display = (target === 'checklist') ? 'flex' : 'none';
+        if (tabP) tabP.style.display = (target === 'property') ? 'block' : 'none';
+        if (tabR) tabR.style.display = (target === 'report') ? 'block' : 'none';
 
         if (target === 'report') renderReport();
       });
@@ -1618,16 +2118,22 @@
 
     // Theme Toggle
     const themeBtn = document.getElementById('btnThemeToggle');
-    themeBtn.addEventListener('click', () => {
+    themeBtn?.addEventListener('click', () => {
       document.body.classList.toggle('theme-dark');
       const isDark = document.body.classList.contains('theme-dark');
       const icon = document.getElementById('themeIcon');
-      icon.setAttribute('data-lucide', isDark ? 'sun' : 'moon');
+      if (icon) icon.setAttribute('data-lucide', isDark ? 'sun' : 'moon');
+
+      const drawerIcon = document.getElementById('drawerThemeIcon');
+      const drawerText = document.getElementById('drawerThemeText');
+      if (drawerIcon) drawerIcon.setAttribute('data-lucide', isDark ? 'sun' : 'moon');
+      if (drawerText) drawerText.textContent = isDark ? 'Light Mode' : 'Dark Mode';
+
       if (window.lucide) lucide.createIcons();
     });
 
     // Save Property Form
-    document.getElementById('btnSavePropertyForm').addEventListener('click', () => {
+    document.getElementById('btnSavePropertyForm')?.addEventListener('click', () => {
       syncFormToState();
       renderPropertyForm();
       renderReport();
@@ -1636,17 +2142,19 @@
 
     // Add Item Modal
     const addItemModal = document.getElementById('addItemModal');
-    document.getElementById('btnOpenAddItemModal').addEventListener('click', () => {
-      document.getElementById('modalNewItemName').value = '';
-      document.getElementById('modalNewItemComments').value = '';
-      addItemModal.style.display = 'flex';
+    document.getElementById('btnOpenAddItemModal')?.addEventListener('click', () => {
+      const n = document.getElementById('modalNewItemName');
+      const c = document.getElementById('modalNewItemComments');
+      if (n) n.value = '';
+      if (c) c.value = '';
+      if (addItemModal) addItemModal.style.display = 'flex';
     });
-    document.getElementById('btnCloseAddItemModal').addEventListener('click', () => addItemModal.style.display = 'none');
-    document.getElementById('btnCancelAddItemModal').addEventListener('click', () => addItemModal.style.display = 'none');
+    document.getElementById('btnCloseAddItemModal')?.addEventListener('click', () => { if (addItemModal) addItemModal.style.display = 'none'; });
+    document.getElementById('btnCancelAddItemModal')?.addEventListener('click', () => { if (addItemModal) addItemModal.style.display = 'none'; });
 
-    document.getElementById('btnConfirmAddItem').addEventListener('click', () => {
-      const name = document.getElementById('modalNewItemName').value.trim();
-      const comments = document.getElementById('modalNewItemComments').value.trim();
+    document.getElementById('btnConfirmAddItem')?.addEventListener('click', () => {
+      const name = document.getElementById('modalNewItemName')?.value.trim();
+      const comments = document.getElementById('modalNewItemComments')?.value.trim();
       const status = document.querySelector('input[name="modalItemStatus"]:checked')?.value || 'Satisfactory';
 
       if (!name) {
@@ -1710,24 +2218,24 @@
 
     // Photo Modal Controls
     const photoModal = document.getElementById('photoModal');
-    document.getElementById('btnClosePhotoModal').addEventListener('click', () => photoModal.style.display = 'none');
-    document.getElementById('btnCancelPhotoModal').addEventListener('click', () => photoModal.style.display = 'none');
+    document.getElementById('btnClosePhotoModal')?.addEventListener('click', () => { if (photoModal) photoModal.style.display = 'none'; });
+    document.getElementById('btnCancelPhotoModal')?.addEventListener('click', () => { if (photoModal) photoModal.style.display = 'none'; });
 
-    document.getElementById('btnSavePhotoCaption').addEventListener('click', () => {
+    document.getElementById('btnSavePhotoCaption')?.addEventListener('click', () => {
       if (!State.activePhotoTarget) return;
       const { secId, itemId, photoIdx } = State.activePhotoTarget;
       const sec = State.sections.find(s => s.id === secId);
       const it = sec?.items.find(i => i.id === itemId);
       if (it && it.photos[photoIdx]) {
-        it.photos[photoIdx].caption = document.getElementById('photoModalCaption').value.trim();
+        it.photos[photoIdx].caption = document.getElementById('photoModalCaption')?.value.trim() || '';
         renderItems();
         renderReport();
         showToast("Caption updated");
       }
-      photoModal.style.display = 'none';
+      if (photoModal) photoModal.style.display = 'none';
     });
 
-    document.getElementById('btnDeletePhoto').addEventListener('click', () => {
+    document.getElementById('btnDeletePhoto')?.addEventListener('click', () => {
       if (!State.activePhotoTarget) return;
       const { secId, itemId, photoIdx } = State.activePhotoTarget;
       const sec = State.sections.find(s => s.id === secId);
@@ -1738,7 +2246,105 @@
         renderReport();
         showToast("Photo deleted");
       }
-      photoModal.style.display = 'none';
+      if (photoModal) photoModal.style.display = 'none';
+    });
+
+    // Automation & AI Modal Event Listeners
+    checkAiConnection();
+
+    // AI Settings Modal
+    const aiModal = document.getElementById('aiSettingsModal');
+    const btnAiSettings = document.getElementById('btnAiSettings');
+    if (btnAiSettings && aiModal) {
+      btnAiSettings.addEventListener('click', () => {
+        checkAiConnection();
+        aiModal.style.display = 'flex';
+      });
+    }
+    document.getElementById('btnCloseAiSettingsModal')?.addEventListener('click', () => aiModal.style.display = 'none');
+    document.getElementById('btnCancelAiSettings')?.addEventListener('click', () => aiModal.style.display = 'none');
+
+    document.getElementById('btnSaveAiKey')?.addEventListener('click', async () => {
+      const key = document.getElementById('aiApiKeyInput')?.value.trim();
+      const model = document.getElementById('aiModelSelect')?.value || 'gemini-1.5-flash';
+      if (!key) {
+        showToast("Please enter an API key.");
+        return;
+      }
+      showToast("Testing Gemini API connection...");
+      try {
+        const resp = await fetch(apiUrl('/api/ai/set-key'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ apiKey: key, model: model })
+        });
+        if (resp.ok) {
+          const res = await resp.json();
+          if (res.success) {
+            showToast("✅ Gemini API connected and saved!");
+            checkAiConnection();
+            aiModal.style.display = 'none';
+          } else {
+            showToast("Connection test failed: " + (res.message || "Unknown error"));
+            checkAiConnection();
+          }
+        }
+      } catch (err) {
+        showToast("Error saving key: " + err.message);
+      }
+    });
+
+    // QA Audit Modal
+    const qaModal = document.getElementById('qaAuditModal');
+    document.getElementById('btnRunQaAudit')?.addEventListener('click', runQaAudit);
+    document.getElementById('chipQaScore')?.addEventListener('click', runQaAudit);
+    document.getElementById('btnCloseQaModal')?.addEventListener('click', () => qaModal.style.display = 'none');
+    document.getElementById('btnCloseQaModalBtn')?.addEventListener('click', () => qaModal.style.display = 'none');
+
+    // AI Batch Polish
+    const batchModal = document.getElementById('aiBatchReviewModal');
+    document.getElementById('btnRunBatchPolish')?.addEventListener('click', runBatchPolish);
+    document.getElementById('btnCloseBatchReviewModal')?.addEventListener('click', () => batchModal.style.display = 'none');
+    document.getElementById('btnDiscardBatchReview')?.addEventListener('click', () => batchModal.style.display = 'none');
+
+    document.getElementById('btnAcceptAllBatchReview')?.addEventListener('click', () => {
+      if (!currentBatchSuggestions || Object.keys(currentBatchSuggestions).length === 0) {
+        batchModal.style.display = 'none';
+        return;
+      }
+
+      let count = 0;
+      for (const sec of State.sections) {
+        for (const it of (sec.items || [])) {
+          const sug = currentBatchSuggestions[it.id];
+          if (sug && sug.polishedComments) {
+            it.comments = sug.polishedComments;
+            if (sug.recommendedStatus) it.status = sug.recommendedStatus;
+            count++;
+          }
+        }
+      }
+
+      batchModal.style.display = 'none';
+      renderItems();
+      updateMetrics();
+      renderReport();
+      showToast(`🎉 Applied AI enhancements to ${count} items!`);
+    });
+
+    // Executive Summary Modal
+    const summaryModal = document.getElementById('aiSummaryModal');
+    document.getElementById('btnGenerateAiSummary')?.addEventListener('click', runExecutiveSummary);
+    document.getElementById('btnCloseSummaryModal')?.addEventListener('click', () => summaryModal.style.display = 'none');
+    document.getElementById('btnCloseSummaryModalBtn')?.addEventListener('click', () => summaryModal.style.display = 'none');
+
+    document.getElementById('btnCopySummaryText')?.addEventListener('click', () => {
+      const content = document.getElementById('aiSummaryContent')?.innerText || '';
+      if (content) {
+        navigator.clipboard.writeText(content).then(() => {
+          showToast("Summary copied to clipboard!");
+        });
+      }
     });
 
     if (window.lucide) lucide.createIcons();

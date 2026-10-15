@@ -10,8 +10,55 @@ import os
 import zipfile
 import base64
 import datetime
+import re
 import xml.etree.ElementTree as ET
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
+
+def safe_clean_xml(xml_content: Any) -> Optional[ET.Element]:
+    """
+    Safely cleans and parses XML strings from Java XMLDecoder (HIP) and generic inspection archives.
+    Handles unescaped '&', unescaped '<' and '>' inside string values, template placeholders (e.g. <<Room>>),
+    and invalid XML control characters.
+    """
+    if not xml_content:
+        return None
+
+    if isinstance(xml_content, bytes):
+        try:
+            text = xml_content.decode('utf-8')
+        except UnicodeDecodeError:
+            text = xml_content.decode('latin-1', errors='replace')
+    else:
+        text = str(xml_content)
+
+    # 1. Strip XML-illegal control characters (except \t, \n, \r)
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
+
+    # 2. In Java XMLDecoder files, string tags often contain raw unescaped characters like &, <, >
+    def clean_string_tag(match):
+        inner = match.group(1)
+        # Protect valid XML entities
+        inner = re.sub(r'&(?!(?:amp|lt|gt|apos|quot);)', '&amp;', inner)
+        # Convert < and > inside string value
+        inner = inner.replace('<', '&lt;').replace('>', '&gt;')
+        return f'<string>{inner}</string>'
+
+    text = re.sub(r'<string>(.*?)</string>', clean_string_tag, text, flags=re.DOTALL)
+
+    # 3. Escape any remaining unescaped ampersands outside string tags
+    text = re.sub(r'&(?!(?:amp|lt|gt|apos|quot);)', '&amp;', text)
+
+    # 4. Clean stray template tags like <<Placeholder>> outside string tags if any
+    text = re.sub(r'<<([^>]+)>>', r'&lt;&lt;\1&gt;&gt;', text)
+
+    try:
+        return ET.fromstring(text)
+    except Exception as e:
+        try:
+            ascii_text = text.encode('ascii', errors='ignore').decode('ascii')
+            return ET.fromstring(ascii_text)
+        except Exception:
+            return None
 
 def normalize_status(st: str) -> str:
     if not st:
@@ -47,9 +94,9 @@ def parse_hip_format(xml_files: Dict[str, str], image_map: Dict[str, str]) -> Tu
     client_xml_str = xml_files.get('ClientInfo.xml') or xml_files.get('clientinfo.xml')
     if client_xml_str:
         try:
-            root = ET.fromstring(client_xml_str)
+            root = safe_clean_xml(client_xml_str)
             raw_props = {}
-            for void in root.iter('void'):
+            for void in (root.iter('void') if root is not None else []):
                 prop = void.attrib.get('property')
                 if prop and len(void) > 0:
                     val = ''.join(void.itertext()).strip()
@@ -101,14 +148,15 @@ def parse_hip_format(xml_files: Dict[str, str], image_map: Dict[str, str]) -> Tu
     tpl_str = xml_files.get('TabbedPanes.tpl') or xml_files.get('tabbedpanes.tpl')
     if tpl_str:
         try:
-            root = ET.fromstring(tpl_str)
-            for void in root.iter('void'):
-                if void.attrib.get('property') == 'tabbedPaneName':
-                    s = void.find('string')
-                    if s is not None and s.text and s.text.strip():
-                        t_name = s.text.strip()
-                        if t_name not in tab_names:
-                            tab_names.append(t_name)
+            root = safe_clean_xml(tpl_str)
+            if root is not None:
+                for void in root.iter('void'):
+                    if void.attrib.get('property') == 'tabbedPaneName':
+                        s = void.find('string')
+                        if s is not None and s.text and s.text.strip():
+                            t_name = s.text.strip()
+                            if t_name not in tab_names:
+                                tab_names.append(t_name)
         except Exception as e:
             print("Error parsing TabbedPanes.tpl:", e)
 
@@ -119,8 +167,8 @@ def parse_hip_format(xml_files: Dict[str, str], image_map: Dict[str, str]) -> Tu
     photo_xml_str = xml_files.get('PhotoInfo.xml') or xml_files.get('photoinfo.xml')
     if photo_xml_str:
         try:
-            root = ET.fromstring(photo_xml_str)
-            for p_obj in root.iter('object'):
+            root = safe_clean_xml(photo_xml_str)
+            for p_obj in (root.iter('object') if root is not None else []):
                 if p_obj.attrib.get('class') == 'homeinspectorpro.PhotoInfo':
                     p_data = {}
                     for void in p_obj.findall('void'):
@@ -159,8 +207,8 @@ def parse_hip_format(xml_files: Dict[str, str], image_map: Dict[str, str]) -> Tu
     damage_xml_str = xml_files.get('DamagePanels.xml') or xml_files.get('damagepanels.xml')
     if damage_xml_str:
         try:
-            root = ET.fromstring(damage_xml_str)
-            for p_obj in root.iter('object'):
+            root = safe_clean_xml(damage_xml_str)
+            for p_obj in (root.iter('object') if root is not None else []):
                 if p_obj.attrib.get('class') == 'homeinspectorpro.DamagePanelInfo':
                     p_name = ""
                     red_notes = []
@@ -215,8 +263,8 @@ def parse_hip_format(xml_files: Dict[str, str], image_map: Dict[str, str]) -> Tu
     sel_xml_str = xml_files.get('SelectionPanels.xml') or xml_files.get('selectionpanels.xml')
     if sel_xml_str:
         try:
-            root = ET.fromstring(sel_xml_str)
-            for s_obj in root.iter('object'):
+            root = safe_clean_xml(sel_xml_str)
+            for s_obj in (root.iter('object') if root is not None else []):
                 if s_obj.attrib.get('class') == 'homeinspectorpro.SelectionPanelInfo':
                     p_name = ""
                     materials = []
@@ -431,26 +479,27 @@ def parse_hzf_bytes(file_bytes: bytes, filename: str = "inspection.hzf") -> Dict
 
         if client_xml_str:
             try:
-                root = ET.fromstring(client_xml_str)
-                for child in root.iter():
-                    tag = child.tag.lower()
-                    text = (child.text or '').strip()
-                    if not text:
-                        continue
-                    if 'clientname' in tag or tag == 'client': client_info['clientName'] = text
-                    elif 'phone' in tag and 'client' in tag: client_info['clientPhone'] = text
-                    elif 'email' in tag and 'client' in tag: client_info['clientEmail'] = text
-                    elif 'address' in tag: client_info['inspectionAddress'] = text
-                    elif 'inspectorname' in tag or tag == 'inspector': client_info['inspectorName'] = text
-                    elif 'license' in tag: client_info['inspectorLicense'] = text
-                    elif 'company' in tag: client_info['inspectionCompany'] = text
-                    elif 'date' in tag: client_info['inspectionDate'] = text
-                    elif 'time' in tag: client_info['inspectionTime'] = text
-                    elif 'weather' in tag: client_info['weather'] = text
-                    elif 'propertytype' in tag or 'buildingtype' in tag: client_info['propertyType'] = text
-                    elif 'yearbuilt' in tag: client_info['yearBuilt'] = text
-                    elif 'squarefootage' in tag or 'sqft' in tag: client_info['squareFootage'] = text
-                    elif 'foundation' in tag: client_info['foundationType'] = text
+                root = safe_clean_xml(client_xml_str)
+                if root is not None:
+                    for child in root.iter():
+                        tag = child.tag.lower()
+                        text = (child.text or '').strip()
+                        if not text:
+                            continue
+                        if 'clientname' in tag or tag == 'client': client_info['clientName'] = text
+                        elif 'phone' in tag and 'client' in tag: client_info['clientPhone'] = text
+                        elif 'email' in tag and 'client' in tag: client_info['clientEmail'] = text
+                        elif 'address' in tag: client_info['inspectionAddress'] = text
+                        elif 'inspectorname' in tag or tag == 'inspector': client_info['inspectorName'] = text
+                        elif 'license' in tag: client_info['inspectorLicense'] = text
+                        elif 'company' in tag: client_info['inspectionCompany'] = text
+                        elif 'date' in tag: client_info['inspectionDate'] = text
+                        elif 'time' in tag: client_info['inspectionTime'] = text
+                        elif 'weather' in tag: client_info['weather'] = text
+                        elif 'propertytype' in tag or 'buildingtype' in tag: client_info['propertyType'] = text
+                        elif 'yearbuilt' in tag: client_info['yearBuilt'] = text
+                        elif 'squarefootage' in tag or 'sqft' in tag: client_info['squareFootage'] = text
+                        elif 'foundation' in tag: client_info['foundationType'] = text
             except Exception as e:
                 print("Generic Client XML parse warning:", e)
 
@@ -464,8 +513,8 @@ def parse_hzf_bytes(file_bytes: bytes, filename: str = "inspection.hzf") -> Dict
 
         if inspection_xml:
             try:
-                root = ET.fromstring(inspection_xml)
-                for s_idx, sec_elem in enumerate(root.iter('Section')):
+                root = safe_clean_xml(inspection_xml)
+                for s_idx, sec_elem in enumerate(root.iter('Section') if root is not None else []):
                     s_id = sec_elem.get('id') or f"sec_{s_idx+1}"
                     s_name = sec_elem.get('name') or sec_elem.findtext('Name') or f"Section {s_idx+1}"
                     s_summary = sec_elem.findtext('Summary') or ""
