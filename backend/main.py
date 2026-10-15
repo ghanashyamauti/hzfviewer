@@ -75,8 +75,9 @@ class PolishItemPayload(BaseModel):
     sectionName: str
     itemName: str
     status: str
-    rawComments: str
+    rawComments: Optional[str] = ""
     photosCount: Optional[int] = 0
+    photos: Optional[List[Dict[str, Any]]] = []
 
 class SetApiKeyPayload(BaseModel):
     apiKey: str
@@ -314,13 +315,14 @@ async def update_ai_key(payload: SetApiKeyPayload):
 
 @app.post("/api/ai/polish-item")
 async def api_polish_item(payload: PolishItemPayload):
-    """Polish a single item's field notes into standard InterNACHI narrative."""
+    """Polish a single item's field notes or inspect attached photos using Gemini Vision."""
     res = await polish_single_item(
         section_name=payload.sectionName,
         item_name=payload.itemName,
         status=payload.status,
-        raw_comments=payload.rawComments,
-        photos_count=payload.photosCount or 0
+        raw_comments=payload.rawComments or "",
+        photos_count=payload.photosCount or len(payload.photos or []),
+        photos=payload.photos or []
     )
     return res
 

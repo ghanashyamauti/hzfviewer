@@ -1046,9 +1046,9 @@
         <div class="item-notes-wrap">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
             <label style="font-size: 0.72rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted);">Observations & Narrative</label>
-            <button type="button" class="btn-polish-item" onclick="window.App.polishItem('${sec.id}', '${item.id}')" title="AI Polish this field note">
-              <i data-lucide="sparkles" style="width: 12px; height: 12px;"></i>
-              <span>AI Polish</span>
+            <button type="button" class="btn-polish-item ${(!item.comments || !item.comments.trim()) && (item.photos && item.photos.length > 0) ? 'btn-polish-vision' : ''}" onclick="window.App.polishItem('${sec.id}', '${item.id}')" title="${(!item.comments || !item.comments.trim()) && (item.photos && item.photos.length > 0) ? 'Inspect photo with Gemini Vision & fill observations' : 'AI Polish this field note'}">
+              <i data-lucide="${(!item.comments || !item.comments.trim()) && (item.photos && item.photos.length > 0) ? 'camera' : 'sparkles'}" style="width: 12px; height: 12px;"></i>
+              <span>${(!item.comments || !item.comments.trim()) && (item.photos && item.photos.length > 0) ? 'AI Inspect Photo' : 'AI Polish'}</span>
             </button>
           </div>
           <textarea class="clean-textarea" id="notes_${item.id}"
@@ -1329,19 +1329,29 @@
       }
     },
 
-    // Polish a single item's field note using Gemini AI
+    // Polish a single item's field note or inspect attached photos using Gemini Vision
     polishItem: async function (secId, itemId) {
       const sec = State.sections.find(s => s.id === secId);
       const it = sec?.items.find(i => i.id === itemId);
       if (!it) return;
 
       const raw = (it.comments || '').trim();
-      if (!raw) {
-        showToast("Please enter an inspector observation first.");
+      const photos = it.photos || [];
+      const hasPhotos = photos.length > 0;
+
+      if (!raw && !hasPhotos) {
+        showToast("Please enter an inspector note or attach a photo first.");
         return;
       }
 
-      showToast("✨ AI polishing narrative...");
+      if (hasPhotos && !raw) {
+        showToast("🔍 AI inspecting photo(s) & generating narrative...");
+      } else if (hasPhotos && raw) {
+        showToast("✨ AI inspecting photo(s) & polishing narrative...");
+      } else {
+        showToast("✨ AI polishing narrative...");
+      }
+
       try {
         const resp = await fetch(apiUrl('/api/ai/polish-item'), {
           method: 'POST',
@@ -1351,7 +1361,12 @@
             itemName: it.name,
             status: it.status,
             rawComments: raw,
-            photosCount: (it.photos || []).length
+            photosCount: photos.length,
+            photos: photos.slice(0, 3).map(p => ({
+              filename: p.filename,
+              dataUrl: p.dataUrl,
+              caption: p.caption
+            }))
           })
         });
 
@@ -1359,11 +1374,22 @@
           const res = await resp.json();
           if (res.success && res.polished) {
             it.comments = res.polished;
-            if (res.recommendedStatus) it.status = res.recommendedStatus;
+            if (res.recommendedStatus && res.recommendedStatus !== 'Inconclusive') {
+              it.status = res.recommendedStatus;
+            }
+            if (res.photoCaption && it.photos && it.photos.length > 0) {
+              if (!it.photos[0].caption || it.photos[0].caption === it.name) {
+                it.photos[0].caption = res.photoCaption;
+              }
+            }
             renderItems();
             updateMetrics();
             renderReport();
-            showToast("✨ Narrative polished with InterNACHI standards!");
+            if (hasPhotos && !raw) {
+              showToast("✨ AI inspected photo & filled observation narrative!");
+            } else {
+              showToast("✨ Narrative polished with InterNACHI standards!");
+            }
             return;
           } else if (res.error) {
             showToast(res.error);
@@ -2323,7 +2349,12 @@
           const sug = currentBatchSuggestions[it.id];
           if (sug && sug.polishedComments) {
             it.comments = sug.polishedComments;
-            if (sug.recommendedStatus) it.status = sug.recommendedStatus;
+            if (sug.recommendedStatus && sug.recommendedStatus !== 'Inconclusive') it.status = sug.recommendedStatus;
+            if (sug.photoCaption && it.photos && it.photos.length > 0) {
+              if (!it.photos[0].caption || it.photos[0].caption === it.name) {
+                it.photos[0].caption = sug.photoCaption;
+              }
+            }
             count++;
           }
         }

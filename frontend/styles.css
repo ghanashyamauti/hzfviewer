@@ -1947,6 +1947,18 @@ body {
   border-color: #a5b4fc;
 }
 
+.btn-polish-item.btn-polish-vision {
+  color: #0d9488;
+  background: #f0fdfa;
+  border-color: #99f6e4;
+  box-shadow: 0 1px 3px rgba(13, 148, 136, 0.15);
+}
+
+.btn-polish-item.btn-polish-vision:hover {
+  background: #ccfbf1;
+  border-color: #5eead4;
+}
+
 /* Executive Summary Box */
 .executive-summary-content {
   display: flex;

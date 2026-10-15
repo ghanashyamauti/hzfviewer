@@ -9,7 +9,7 @@ import json
 import logging
 import asyncio
 import httpx
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
@@ -125,15 +125,33 @@ async def test_gemini_connection() -> Dict[str, Any]:
             "message": f"Failed to connect to Gemini API: {str(e)}"
         }
 
+def extract_mime_and_base64(data_url: Any) -> Optional[Tuple[str, str]]:
+    """Extracts MIME type and pure base64 string from data URL or raw string."""
+    if not data_url or not isinstance(data_url, str):
+        return None
+    if "base64," in data_url:
+        header, b64_str = data_url.split("base64,", 1)
+        mime = "image/jpeg"
+        if "data:" in header:
+            mime = header.replace("data:", "").replace(";", "").strip() or "image/jpeg"
+        if mime == "image/jpg":
+            mime = "image/jpeg"
+        b64_clean = b64_str.strip().replace("\n", "").replace("\r", "")
+        if len(b64_clean) > 50:
+            return mime, b64_clean
+    return None
+
 async def polish_single_item(
     section_name: str,
     item_name: str,
     status: str,
-    raw_comments: str,
-    photos_count: int = 0
+    raw_comments: Optional[str] = "",
+    photos_count: int = 0,
+    photos: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     """
-    Polishes a single inspection item's field notes into a professional narrative.
+    Polishes an inspection item's field notes or visually inspects attached photos
+    using Google Gemini Vision to fill blank comment boxes.
     """
     if not is_ai_configured():
         return {
@@ -141,39 +159,121 @@ async def polish_single_item(
             "error": "Gemini API key is not configured in backend/.env."
         }
 
-    if not raw_comments or len(raw_comments.strip()) < 3:
-        # Nothing substantive to polish
+    raw = (raw_comments or "").strip()
+    valid_image_parts = []
+
+    if photos:
+        for p in photos[:3]:  # inspect up to 3 attached photos per item
+            durl = p.get("dataUrl") or p.get("data")
+            extracted = extract_mime_and_base64(durl)
+            if extracted:
+                mime, b64 = extracted
+                valid_image_parts.append({
+                    "inline_data": {
+                        "mime_type": mime,
+                        "data": b64
+                    }
+                })
+
+    has_text = len(raw) >= 3
+    has_images = len(valid_image_parts) > 0
+
+    if not has_text and not has_images:
         return {
-            "success": True,
-            "original": raw_comments,
-            "polished": raw_comments,
-            "recommendedStatus": status,
-            "trade": "General",
-            "summaryBullet": f"{item_name}: Inspected."
+            "success": False,
+            "error": "Please enter an inspector observation or attach at least one photo for AI to inspect."
         }
 
-    prompt = f"""{SYSTEM_PROMPT}
+    if has_images and not has_text:
+        # User uploaded photos but left note blank -> Gemini Vision inspects image and generates narrative
+        prompt = f"""{SYSTEM_PROMPT}
 
-Inspect the following field note from a home inspection:
+You are an InterNACHI Master Home Inspector and QA specialist.
+The inspector attached {len(valid_image_parts)} photo(s) of this inspection component, but the field observation note is currently blank.
+
+Examine the attached photo(s) carefully:
 - Section / Room: {section_name}
 - Component / Item: {item_name}
-- Current Status: {status}
-- Number of attached photos: {photos_count}
-- Inspector's Raw Field Note: "{raw_comments}"
+- Current Inspector Status: {status}
+
+INSTRUCTIONS:
+1. Visually inspect the component in the photo(s). Identify what is shown, any visible defects, material issues, installation defects, damage, moisture signs, safety hazards, or if it appears functional.
+2. Generate a formal, professional InterNACHI narrative following the three-part format:
+   - Observation: Exact factual finding based on what is visible in the photo (location, component, observed condition).
+   - Implication: Potential risk or consequence if left unaddressed (e.g. moisture intrusion, structural compromise, electrical fire hazard, safety risk).
+   - Recommendation: Clear recommendation specifying the appropriate licensed trade (e.g. licensed electrician, licensed plumber, licensed roofing contractor).
+3. Recommend the appropriate defect severity status: "Safety Hazard" | "Defective" | "Marginal" | "Satisfactory".
+4. Recommend the contractor trade: "Plumbing" | "Electrical" | "HVAC" | "Roofing" | "Structural" | "General Contractor" | "Specialist".
+5. Provide a 1-sentence executive summary bullet.
+6. Provide a concise, descriptive caption for the primary photo.
 
 Respond strictly with a valid JSON object with the following keys:
 {{
   "polishedComments": "Formal expanded professional narrative following Observation, Implication, Recommendation.",
   "recommendedStatus": "Safety Hazard" | "Defective" | "Marginal" | "Satisfactory",
   "trade": "Plumbing" | "Electrical" | "HVAC" | "Roofing" | "Structural" | "General Contractor" | "Specialist",
-  "summaryBullet": "A concise 1-sentence bullet summarizing the defect and required action for the client summary page."
+  "summaryBullet": "A concise 1-sentence bullet summarizing the defect and required action for the client summary page.",
+  "photoCaption": "Concise defect note for photo"
+}}
+Do NOT include markdown formatting or backticks around the JSON. Only return pure JSON.
+"""
+    elif has_images and has_text:
+        # Both text field note and photos exist -> corroborate note with visual inspection
+        prompt = f"""{SYSTEM_PROMPT}
+
+You are an InterNACHI Master Home Inspector and QA specialist.
+Inspect the following field note and the attached {len(valid_image_parts)} photo(s) from a home inspection:
+- Section / Room: {section_name}
+- Component / Item: {item_name}
+- Current Status: {status}
+- Inspector's Raw Field Note: "{raw}"
+
+INSTRUCTIONS:
+1. Synthesize the inspector's note with visual findings observed in the attached photo(s) to formulate an accurate and comprehensive narrative.
+2. Structure the polished narrative with Observation, Implication, and Recommendation.
+3. Recommend the appropriate defect severity status: "Safety Hazard" | "Defective" | "Marginal" | "Satisfactory".
+4. Recommend the contractor trade.
+5. Provide a 1-sentence executive summary bullet.
+6. Provide a concise, descriptive caption for the primary photo.
+
+Respond strictly with a valid JSON object with the following keys:
+{{
+  "polishedComments": "Formal expanded professional narrative following Observation, Implication, Recommendation.",
+  "recommendedStatus": "Safety Hazard" | "Defective" | "Marginal" | "Satisfactory",
+  "trade": "Plumbing" | "Electrical" | "HVAC" | "Roofing" | "Structural" | "General Contractor" | "Specialist",
+  "summaryBullet": "A concise 1-sentence bullet summarizing the defect and required action for the client summary page.",
+  "photoCaption": "Concise defect note for photo"
+}}
+Do NOT include markdown formatting or backticks around the JSON. Only return pure JSON.
+"""
+    else:
+        # Text-only polishing
+        prompt = f"""{SYSTEM_PROMPT}
+
+Inspect the following field note from a home inspection:
+- Section / Room: {section_name}
+- Component / Item: {item_name}
+- Current Status: {status}
+- Number of attached photos: {photos_count}
+- Inspector's Raw Field Note: "{raw}"
+
+Respond strictly with a valid JSON object with the following keys:
+{{
+  "polishedComments": "Formal expanded professional narrative following Observation, Implication, Recommendation.",
+  "recommendedStatus": "Safety Hazard" | "Defective" | "Marginal" | "Satisfactory",
+  "trade": "Plumbing" | "Electrical" | "HVAC" | "Roofing" | "Structural" | "General Contractor" | "Specialist",
+  "summaryBullet": "A concise 1-sentence bullet summarizing the defect and required action for the client summary page.",
+  "photoCaption": "{item_name}"
 }}
 Do NOT include markdown formatting or backticks around the JSON. Only return pure JSON.
 """
 
+    parts = list(valid_image_parts)
+    parts.append({"text": prompt})
+
     req_body = {
         "contents": [
-            {"parts": [{"text": prompt}]}
+            {"parts": parts}
         ],
         "generationConfig": {
             "temperature": 0.2,
@@ -182,7 +282,7 @@ Do NOT include markdown formatting or backticks around the JSON. Only return pur
     }
 
     try:
-        resp = await call_gemini_with_retry(req_body, max_retries=3, timeout=25.0)
+        resp = await call_gemini_with_retry(req_body, max_retries=3, timeout=35.0)
         if not resp or resp.status_code != 200:
             return {
                 "success": False,
@@ -204,11 +304,12 @@ Do NOT include markdown formatting or backticks around the JSON. Only return pur
         parsed = json.loads(raw_text)
         return {
             "success": True,
-            "original": raw_comments,
-            "polished": parsed.get("polishedComments", raw_comments),
+            "original": raw,
+            "polished": parsed.get("polishedComments", raw),
             "recommendedStatus": parsed.get("recommendedStatus", status),
             "trade": parsed.get("trade", "General"),
-            "summaryBullet": parsed.get("summaryBullet", "")
+            "summaryBullet": parsed.get("summaryBullet", ""),
+            "photoCaption": parsed.get("photoCaption", "")
         }
     except Exception as e:
         logger.error(f"Error in polish_single_item: {e}")
@@ -219,8 +320,8 @@ Do NOT include markdown formatting or backticks around the JSON. Only return pur
 
 async def batch_polish_inspection(inspection_data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Scans all items in the inspection, filters those with defects or notes,
-    and runs batch narrative polishing.
+    Scans all items in the inspection, filters those with defects, notes, or attached photos,
+    and runs batch narrative polishing with Gemini Vision.
     """
     if not is_ai_configured():
         return {
@@ -240,15 +341,16 @@ async def batch_polish_inspection(inspection_data: Dict[str, Any]) -> Dict[str, 
             comments = (item.get("comments") or "").strip()
             photos = item.get("photos", [])
 
-            # We process items marked Defective/Hazard/Marginal OR having substantive comments
-            if status in ["Defective", "Safety Hazard", "Marginal"] or len(comments) > 5:
+            # Process items marked Defective/Hazard/Marginal OR having substantive comments OR having photos
+            if status in ["Defective", "Safety Hazard", "Marginal"] or len(comments) > 5 or len(photos) > 0:
                 items_to_process.append({
                     "itemId": item_id,
                     "sectionName": sec_name,
                     "itemName": item_name,
                     "status": status,
                     "rawComments": comments,
-                    "photosCount": len(photos)
+                    "photosCount": len(photos),
+                    "photos": photos
                 })
 
     if not items_to_process:
@@ -256,59 +358,37 @@ async def batch_polish_inspection(inspection_data: Dict[str, Any]) -> Dict[str, 
             "success": True,
             "processedCount": 0,
             "results": {},
-            "message": "No defective or noted items required polishing."
+            "message": "No defective, noted, or photo items required polishing."
         }
 
-    # Batch into groups of up to 8 items to prevent context overflow and respect token limits
+    sem = asyncio.Semaphore(3)
+    async def process_one(it_data):
+        async with sem:
+            res = await polish_single_item(
+                section_name=it_data["sectionName"],
+                item_name=it_data["itemName"],
+                status=it_data["status"],
+                raw_comments=it_data["rawComments"],
+                photos_count=it_data["photosCount"],
+                photos=it_data.get("photos", [])
+            )
+            if res.get("success"):
+                return it_data["itemId"], {
+                    "polishedComments": res.get("polished", ""),
+                    "recommendedStatus": res.get("recommendedStatus", it_data["status"]),
+                    "trade": res.get("trade", "General"),
+                    "summaryBullet": res.get("summaryBullet", ""),
+                    "photoCaption": res.get("photoCaption", "")
+                }
+            return it_data["itemId"], None
+
+    tasks = [process_one(it) for it in items_to_process]
+    completed = await asyncio.gather(*tasks, return_exceptions=True)
+
     results = {}
-    batch_size = 8
-
-    for i in range(0, len(items_to_process), batch_size):
-        chunk = items_to_process[i:i + batch_size]
-        prompt = f"""{SYSTEM_PROMPT}
-
-Polish the following batch of home inspection items from mobile field notes.
-Items list:
-{json.dumps(chunk, indent=2)}
-
-Respond strictly with a JSON object mapping each itemId to its polished output:
-{{
-  "results": {{
-    "<itemId>": {{
-      "polishedComments": "Formal expanded professional narrative following Observation, Implication, Recommendation.",
-      "recommendedStatus": "Safety Hazard" | "Defective" | "Marginal" | "Satisfactory",
-      "trade": "Plumbing" | "Electrical" | "HVAC" | "Roofing" | "Structural" | "General Contractor",
-      "summaryBullet": "1-sentence executive bullet"
-    }}
-  }}
-}}
-Do NOT include markdown formatting. Return pure JSON.
-"""
-        url = get_gemini_url()
-        req_body = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.2,
-                "responseMimeType": "application/json"
-            }
-        }
-
-        try:
-            resp = await call_gemini_with_retry(req_body, max_retries=3, timeout=35.0)
-            if resp and resp.status_code == 200:
-                data = resp.json()
-                raw_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                if raw_text.startswith("```json"): raw_text = raw_text[7:]
-                if raw_text.startswith("```"): raw_text = raw_text[3:]
-                if raw_text.endswith("```"): raw_text = raw_text[:-3]
-                parsed = json.loads(raw_text.strip())
-                batch_res = parsed.get("results") if (isinstance(parsed, dict) and isinstance(parsed.get("results"), dict)) else parsed
-                if isinstance(batch_res, dict):
-                    results.update(batch_res)
-            else:
-                logger.warning(f"Batch polish chunk failed with status {resp.status_code if resp else 'error'}")
-        except Exception as e:
-            logger.error(f"Error processing batch chunk: {e}")
+    for entry in completed:
+        if isinstance(entry, tuple) and entry[1] is not None:
+            results[entry[0]] = entry[1]
 
     return {
         "success": True,
