@@ -12,6 +12,7 @@ if not exist "venv" (
     pip install -r requirements.txt
 ) else (
     call "venv\Scripts\activate.bat"
+    python -m pip install -r requirements.txt --quiet
 )
 
 if not exist ".env" (
