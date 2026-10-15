@@ -1,6 +1,12 @@
 {
   "version": 2,
   "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://hzfviewer.onrender.com/api/:path*"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",

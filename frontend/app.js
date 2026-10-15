@@ -20,7 +20,11 @@
 
   // Dynamic API Base URL resolver for local dev & Vercel / Render deployment
   function apiUrl(endpoint) {
-    let base = (window.ENV && window.ENV.API_BASE_URL) || localStorage.getItem('API_BASE_URL') || '';
+    let stored = localStorage.getItem('API_BASE_URL');
+    if (stored && window.location.protocol === 'https:' && stored.startsWith('http://')) {
+      stored = ''; // Ignore insecure localhost override when browsing on HTTPS
+    }
+    let base = (window.ENV && window.ENV.API_BASE_URL) || stored || '';
     if (!base && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') && window.location.port !== '8000' && window.location.port !== '8001') {
       base = 'http://127.0.0.1:8000';
     }
