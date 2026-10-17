@@ -26,12 +26,20 @@ from ai_service import (
 )
 from qa_validator import audit_inspection
 
-# Load environment configuration
-load_dotenv()
+# Load environment configuration from backend/.env or parent .env
+backend_env = os.path.join(os.path.dirname(__file__), ".env")
+root_env = os.path.join(os.path.dirname(__file__), "..", ".env")
+load_dotenv(backend_env, override=True)
+load_dotenv(root_env, override=False)
 
-HOST = os.getenv("HOST", "127.0.0.1")
+HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
 SAVED_DIR = os.getenv("SAVED_REPORTS_DIR", "saved_reports")
+CORS_ORIGINS_ENV = os.getenv("CORS_ORIGINS", "*")
+APP_NAME = os.getenv("APP_NAME", "HZF & BIN Inspector Studio API")
+APP_VERSION = os.getenv("APP_VERSION", "2.3.0")
+APP_ENV = os.getenv("APP_ENV", "production")
+DEBUG_MODE = os.getenv("DEBUG", "False").lower() in ("true", "1", "yes")
 
 # Ensure local backup directory exists
 saved_reports_path = os.path.join(os.path.dirname(__file__), SAVED_DIR)
@@ -41,14 +49,14 @@ os.makedirs(saved_reports_path, exist_ok=True)
 init_db()
 
 app = FastAPI(
-    title="HZF & BIN Inspector Studio API",
-    description="Backend services with Neon PostgreSQL for storing and generating .hzf/.bin inspections",
-    version="2.3.0"
+    title=APP_NAME,
+    description="Backend services for storing and generating .hzf/.bin inspections",
+    version=APP_VERSION,
+    debug=DEBUG_MODE
 )
 
 # CORS Setup for Vercel / Cloud Deployments
-cors_origins_env = os.getenv("CORS_ORIGINS", "*")
-if cors_origins_env == "*":
+if CORS_ORIGINS_ENV == "*":
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -59,11 +67,12 @@ if cors_origins_env == "*":
 else:
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[o.strip() for o in cors_origins_env.split(",") if o.strip()],
+        allow_origins=[o.strip() for o in CORS_ORIGINS_ENV.split(",") if o.strip()],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
 
 @app.middleware("http")
 async def add_no_cache_for_static(request, call_next):
@@ -91,7 +100,25 @@ class PolishItemPayload(BaseModel):
 
 class SetApiKeyPayload(BaseModel):
     apiKey: str
-    model: Optional[str] = "gemini-3-flash-preview"
+    model: Optional[str] = None
+
+@app.get("/api/config")
+async def get_system_config():
+    """Return non-sensitive environment configuration loaded from .env."""
+    db_reports = list_reports_from_db()
+    db_count = len(db_reports) if db_reports is not None else 0
+    return {
+        "appName": APP_NAME,
+        "version": APP_VERSION,
+        "environment": APP_ENV,
+        "host": HOST,
+        "port": PORT,
+        "geminiModel": os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        "databaseConnected": bool(os.getenv("DATABASE_URL")),
+        "savedReportsDir": SAVED_DIR,
+        "savedReportsCount": db_count,
+        "corsOrigins": CORS_ORIGINS_ENV,
+    }
 
 @app.get("/api/health")
 async def health_check():
@@ -99,10 +126,13 @@ async def health_check():
     db_count = len(db_reports) if db_reports is not None else 0
     return {
         "status": "online",
-        "app": "HZF & BIN Inspector Studio",
-        "database": "Neon PostgreSQL (Connected)",
+        "app": APP_NAME,
+        "version": APP_VERSION,
+        "environment": APP_ENV,
+        "database": "Neon PostgreSQL (Connected)" if os.getenv("DATABASE_URL") else "Local Storage",
         "savedReportsCount": db_count
     }
+
 
 @app.get("/api/template")
 async def get_template():
@@ -289,7 +319,8 @@ async def get_ai_status():
 async def update_ai_key(payload: SetApiKeyPayload):
     """Dynamically set or update Gemini API key in .env and runtime."""
     key = payload.apiKey.strip()
-    model = payload.model or "gemini-3-flash-preview"
+    model = payload.model or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
     
     os.environ["GEMINI_API_KEY"] = key
     os.environ["GEMINI_MODEL"] = model
@@ -367,11 +398,13 @@ if has_frontend:
     async def api_status():
         return {
             "status": "online",
-            "app": "HZF & BIN Inspector Studio API",
-            "database": "Neon PostgreSQL (Connected)",
-            "version": "2.3.0",
+            "app": APP_NAME,
+            "version": APP_VERSION,
+            "environment": APP_ENV,
+            "database": "Neon PostgreSQL (Connected)" if os.getenv("DATABASE_URL") else "Local Storage",
             "docs": "/docs",
-            "health": "/api/health"
+            "health": "/api/health",
+            "config": "/api/config"
         }
     app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
 else:
@@ -380,14 +413,17 @@ else:
     async def root_status():
         return {
             "status": "online",
-            "app": "HZF & BIN Inspector Studio API",
-            "database": "Neon PostgreSQL (Connected)",
-            "version": "2.3.0",
+            "app": APP_NAME,
+            "version": APP_VERSION,
+            "environment": APP_ENV,
+            "database": "Neon PostgreSQL (Connected)" if os.getenv("DATABASE_URL") else "Local Storage",
             "docs": "/docs",
-            "health": "/api/health"
+            "health": "/api/health",
+            "config": "/api/config"
         }
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=HOST, port=PORT, reload=False)
+
 

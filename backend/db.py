@@ -10,9 +10,13 @@ import psycopg2.extras
 from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
 
-load_dotenv()
+backend_env = os.path.join(os.path.dirname(__file__), ".env")
+root_env = os.path.join(os.path.dirname(__file__), "..", ".env")
+load_dotenv(backend_env, override=True)
+load_dotenv(root_env, override=False)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+
 
 def get_connection():
     """Return a psycopg2 connection if DATABASE_URL is configured."""

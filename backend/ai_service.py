@@ -12,7 +12,10 @@ import httpx
 from typing import Dict, Any, List, Optional, Tuple
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+backend_env = os.path.join(os.path.dirname(__file__), ".env")
+root_env = os.path.join(os.path.dirname(__file__), "..", ".env")
+load_dotenv(backend_env, override=True)
+load_dotenv(root_env, override=False)
 
 logger = logging.getLogger("ai_service")
 
@@ -21,7 +24,11 @@ def get_api_key() -> str:
 
 def get_model() -> str:
     m = os.getenv("GEMINI_MODEL", "").strip()
-    return m if m and m != "gemini-flash-latest" else "gemini-flash-lite-latest"
+    return m if m and m != "gemini-flash-latest" else "gemini-2.5-flash"
+
+def get_fallback_models() -> List[str]:
+    raw = os.getenv("GEMINI_FALLBACK_MODELS", "gemini-2.0-flash,gemini-1.5-flash,gemini-flash-lite-latest,gemini-3-flash-preview")
+    return [m.strip() for m in raw.split(",") if m.strip()]
 
 def is_ai_configured() -> bool:
     key = get_api_key()
@@ -32,14 +39,19 @@ def get_gemini_url(model: Optional[str] = None) -> str:
     key = get_api_key()
     return f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={key}"
 
-async def call_gemini_with_retry(payload: Dict[str, Any], max_retries: int = 3, timeout: float = 30.0) -> httpx.Response:
+async def call_gemini_with_retry(payload: Dict[str, Any], max_retries: Optional[int] = None, timeout: Optional[float] = None) -> httpx.Response:
+    if max_retries is None:
+        max_retries = int(os.getenv("AI_MAX_RETRIES", "3"))
+    if timeout is None:
+        timeout = float(os.getenv("AI_TIMEOUT_SECONDS", "30.0"))
+
     primary = get_model()
-    # Ordered fallback chain to ensure high availability and prevent 429 quota halts
-    candidates = [primary, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-flash-lite-latest", "gemini-3-flash-preview"]
+    candidates = [primary] + get_fallback_models()
     models_to_try = []
     for c in candidates:
         if c and c not in models_to_try:
             models_to_try.append(c)
+
 
     last_resp = None
     for model_name in models_to_try:
