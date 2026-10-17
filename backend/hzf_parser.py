@@ -447,6 +447,8 @@ def parse_hzf_bytes(file_bytes: bytes, filename: str = "inspection.hzf") -> Dict
                 data_url = f"data:{mime};base64,{b64}"
                 image_map[base_name] = data_url
                 image_map[name] = data_url
+                image_map[base_name.lower()] = data_url
+                image_map[name.lower()] = data_url
 
             elif lower_name.endswith(('.xml', '.tpl', '.dat', '.txt')):
                 try:
@@ -454,86 +456,77 @@ def parse_hzf_bytes(file_bytes: bytes, filename: str = "inspection.hzf") -> Dict
                 except Exception:
                     pass
 
-    # Step 1: Check for Home Inspector Pro (HIP) format first
-    hip_keys = ['damagepanels.xml', 'tabbedpanes.tpl', 'photoinfo.xml']
-    has_hip_signatures = any(k in [f.lower() for f in xml_files.keys()] for k in hip_keys)
+    # Step 1: Check for lossless HZF Studio format (InspectionData.xml) first
+    inspection_xml = xml_files.get('InspectionData.xml') or xml_files.get('inspectiondata.xml')
+    if not inspection_xml:
+        for x_text in xml_files.values():
+            if '<InspectionReport' in x_text or ('<Sections>' in x_text and '<Items>' in x_text):
+                inspection_xml = x_text
+                break
 
-    if has_hip_signatures:
+    if inspection_xml:
         try:
-            hip_client, hip_sections = parse_hip_format(xml_files, image_map)
-            if hip_sections:
-                client_info.update(hip_client)
-                sections = hip_sections
-        except Exception as e:
-            print("HIP parser warning:", e)
+            root = safe_clean_xml(inspection_xml)
+            if root is not None:
+                # Extract client info from embedded ClientInfo if present
+                c_node = root.find('ClientInfo')
+                if c_node is not None:
+                    for child in c_node:
+                        val = (child.text or '').strip()
+                        if val:
+                            client_info[child.tag] = val
+                            t_low = child.tag.lower()
+                            if 'address' in t_low: client_info['inspectionAddress'] = val
+                            elif 'clientname' in t_low or t_low == 'client': client_info['clientName'] = val
+                            elif 'phone' in t_low: client_info['clientPhone'] = val
+                            elif 'email' in t_low: client_info['clientEmail'] = val
+                            elif 'inspectorname' in t_low or t_low == 'inspector': client_info['inspectorName'] = val
+                            elif 'license' in t_low: client_info['inspectorLicense'] = val
+                            elif 'company' in t_low: client_info['inspectionCompany'] = val
+                            elif 'date' in t_low: client_info['inspectionDate'] = val
+                            elif 'time' in t_low: client_info['inspectionTime'] = val
+                            elif 'weather' in t_low: client_info['weather'] = val
+                            elif 'propertytype' in t_low: client_info['propertyType'] = val
+                            elif 'yearbuilt' in t_low: client_info['yearBuilt'] = val
+                            elif 'sqft' in t_low or 'squarefootage' in t_low: client_info['squareFootage'] = val
 
-    # Step 2: Fallback to Generic InspectionData.xml / report.xml
-    if not sections:
-        # Client XML
-        client_xml_str = xml_files.get('ClientInfo.xml') or xml_files.get('client.xml')
-        if not client_xml_str:
-            for x_text in xml_files.values():
-                if '<ClientName>' in x_text or '<InspectionAddress>' in x_text or '<Client' in x_text:
-                    client_xml_str = x_text
-                    break
-
-        if client_xml_str:
-            try:
-                root = safe_clean_xml(client_xml_str)
-                if root is not None:
-                    for child in root.iter():
-                        tag = child.tag.lower()
-                        text = (child.text or '').strip()
-                        if not text:
-                            continue
-                        if 'clientname' in tag or tag == 'client': client_info['clientName'] = text
-                        elif 'phone' in tag and 'client' in tag: client_info['clientPhone'] = text
-                        elif 'email' in tag and 'client' in tag: client_info['clientEmail'] = text
-                        elif 'address' in tag: client_info['inspectionAddress'] = text
-                        elif 'inspectorname' in tag or tag == 'inspector': client_info['inspectorName'] = text
-                        elif 'license' in tag: client_info['inspectorLicense'] = text
-                        elif 'company' in tag: client_info['inspectionCompany'] = text
-                        elif 'date' in tag: client_info['inspectionDate'] = text
-                        elif 'time' in tag: client_info['inspectionTime'] = text
-                        elif 'weather' in tag: client_info['weather'] = text
-                        elif 'propertytype' in tag or 'buildingtype' in tag: client_info['propertyType'] = text
-                        elif 'yearbuilt' in tag: client_info['yearBuilt'] = text
-                        elif 'squarefootage' in tag or 'sqft' in tag: client_info['squareFootage'] = text
-                        elif 'foundation' in tag: client_info['foundationType'] = text
-            except Exception as e:
-                print("Generic Client XML parse warning:", e)
-
-        # Inspection Sections
-        inspection_xml = xml_files.get('InspectionData.xml') or xml_files.get('report.xml')
-        if not inspection_xml:
-            for x_text in xml_files.values():
-                if '<Section' in x_text or '<Items' in x_text:
-                    inspection_xml = x_text
-                    break
-
-        if inspection_xml:
-            try:
-                root = safe_clean_xml(inspection_xml)
-                for s_idx, sec_elem in enumerate(root.iter('Section') if root is not None else []):
+                for s_idx, sec_elem in enumerate(root.iter('Section')):
                     s_id = sec_elem.get('id') or f"sec_{s_idx+1}"
                     s_name = sec_elem.get('name') or sec_elem.findtext('Name') or f"Section {s_idx+1}"
                     s_summary = sec_elem.findtext('Summary') or ""
 
                     items = []
-                    for i_idx, item_elem in enumerate(sec_elem.iter('Item')):
+                    items_container = sec_elem.find('Items')
+                    item_nodes = items_container.findall('Item') if items_container is not None else sec_elem.findall('Item')
+                    if not item_nodes:
+                        item_nodes = list(sec_elem.iter('Item'))
+
+                    for i_idx, item_elem in enumerate(item_nodes):
                         i_id = item_elem.get('id') or f"item_{s_id}_{i_idx+1}"
                         i_name = item_elem.get('name') or item_elem.findtext('Name') or f"Item {i_idx+1}"
                         raw_status = item_elem.findtext('Status') or item_elem.findtext('Rating') or "Satisfactory"
                         comments = item_elem.findtext('Comments') or item_elem.findtext('Narrative') or ""
 
                         photos = []
-                        for p_elem in item_elem.iter('Photo'):
+                        photos_container = item_elem.find('Photos')
+                        p_nodes = photos_container.findall('Photo') if photos_container is not None else item_elem.findall('Photo')
+                        if not p_nodes:
+                            p_nodes = list(item_elem.iter('Photo'))
+
+                        for p_elem in p_nodes:
                             p_file = p_elem.get('filename') or (p_elem.text or '').strip()
                             p_cap = p_elem.get('caption') or ""
                             if p_file:
-                                data_url = image_map.get(p_file) or image_map.get(os.path.basename(p_file)) or ""
+                                b_name = os.path.basename(p_file)
+                                data_url = (
+                                    image_map.get(p_file) or
+                                    image_map.get(b_name) or
+                                    image_map.get(p_file.lower()) or
+                                    image_map.get(b_name.lower()) or
+                                    ""
+                                )
                                 photos.append({
-                                    "filename": p_file,
+                                    "filename": b_name,
                                     "dataUrl": data_url,
                                     "caption": p_cap
                                 })
@@ -552,10 +545,76 @@ def parse_hzf_bytes(file_bytes: bytes, filename: str = "inspection.hzf") -> Dict
                         "summary": s_summary,
                         "items": items
                     })
-            except Exception as e:
-                print("Generic Inspection XML parse warning:", e)
+        except Exception as e:
+            print("InspectionData XML parse warning:", e)
 
-    # Step 3: If no structured sections could be identified, organize photos
+    # Step 2: Fallback to native Home Inspector Pro (HIP) XMLDecoder format if no InspectionData
+    if not sections:
+        hip_keys = ['damagepanels.xml', 'tabbedpanes.tpl', 'photoinfo.xml']
+        has_hip_signatures = any(k in [f.lower() for f in xml_files.keys()] for k in hip_keys)
+
+        if has_hip_signatures:
+            try:
+                hip_client, hip_sections = parse_hip_format(xml_files, image_map)
+                if hip_sections:
+                    client_info.update(hip_client)
+                    sections = hip_sections
+            except Exception as e:
+                print("HIP parser warning:", e)
+
+    # Step 3: Extract client info if not already loaded
+    if not client_info:
+        client_xml_str = xml_files.get('ClientInfo.xml') or xml_files.get('clientinfo.xml') or xml_files.get('client.xml')
+        if not client_xml_str:
+            for x_text in xml_files.values():
+                if '<ClientName>' in x_text or '<InspectionAddress>' in x_text or '<Client' in x_text:
+                    client_xml_str = x_text
+                    break
+
+        if client_xml_str:
+            try:
+                root = safe_clean_xml(client_xml_str)
+                if root is not None:
+                    # Check for Java XMLDecoder object
+                    c_obj = root.find('object')
+                    if c_obj is not None and 'ClientInfo' in (c_obj.attrib.get('class') or ''):
+                        for void in c_obj.findall('void'):
+                            prop = void.attrib.get('property')
+                            val = ''.join(void.itertext()).strip()
+                            if val:
+                                if prop in ['address', 'inspectionAddress']: client_info['inspectionAddress'] = val
+                                elif prop in ['firstName', 'clientName']: client_info['clientName'] = val
+                                elif prop in ['phone', 'clientPhone']: client_info['clientPhone'] = val
+                                elif prop in ['email', 'clientEmail']: client_info['clientEmail'] = val
+                                elif prop in ['inspectorName']: client_info['inspectorName'] = val
+                                elif prop in ['company', 'inspectionCompany']: client_info['inspectionCompany'] = val
+                                elif prop in ['inspectionDate']: client_info['inspectionDate'] = val
+                                elif prop in ['weather']: client_info['weather'] = val
+                                elif prop in ['otherInfo', 'propertyType']: client_info['propertyType'] = val
+                    else:
+                        for child in root.iter():
+                            tag = child.tag.lower()
+                            text = (child.text or '').strip()
+                            if not text:
+                                continue
+                            if 'clientname' in tag or tag == 'client': client_info['clientName'] = text
+                            elif 'phone' in tag and 'client' in tag: client_info['clientPhone'] = text
+                            elif 'email' in tag and 'client' in tag: client_info['clientEmail'] = text
+                            elif 'address' in tag: client_info['inspectionAddress'] = text
+                            elif 'inspectorname' in tag or tag == 'inspector': client_info['inspectorName'] = text
+                            elif 'license' in tag: client_info['inspectorLicense'] = text
+                            elif 'company' in tag: client_info['inspectionCompany'] = text
+                            elif 'date' in tag: client_info['inspectionDate'] = text
+                            elif 'time' in tag: client_info['inspectionTime'] = text
+                            elif 'weather' in tag: client_info['weather'] = text
+                            elif 'propertytype' in tag or 'buildingtype' in tag: client_info['propertyType'] = text
+                            elif 'yearbuilt' in tag: client_info['yearBuilt'] = text
+                            elif 'squarefootage' in tag or 'sqft' in tag: client_info['squareFootage'] = text
+                            elif 'foundation' in tag: client_info['foundationType'] = text
+            except Exception as e:
+                print("Client XML parse warning:", e)
+
+    # Step 4: If no structured sections could be identified, organize photos
     if not sections and image_map:
         sections = [
             {
@@ -592,16 +651,44 @@ def build_hzf_bytes(data: Dict[str, Any]) -> bytes:
     sections = data.get('sections', [])
 
     with zipfile.ZipFile(buffer, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
-        # 1. Generate ClientInfo.xml
-        c_root = ET.Element("ClientData")
-        for k, v in client.items():
-            child = ET.SubElement(c_root, k)
-            child.text = str(v or "")
-        client_xml = ET.tostring(c_root, encoding='utf-8', xml_declaration=True)
-        z.writestr("ClientInfo.xml", client_xml)
+        # 1. Generate ClientInfo.xml (Java XMLDecoder structure compatible with HIP)
+        c_lines = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<java version="1.8.0_131" class="java.beans.XMLDecoder">',
+            '<object class="homeinspectorpro.ClientInfo">'
+        ]
+        c_map = {
+            'clientName': 'firstName',
+            'clientPhone': 'phone',
+            'clientEmail': 'email',
+            'inspectionAddress': 'address',
+            'inspectorName': 'inspectorName',
+            'inspectionCompany': 'company',
+            'inspectorLicense': 'license',
+            'inspectionDate': 'inspectionDate',
+            'inspectionTime': 'inspectionTime',
+            'weather': 'weather',
+            'propertyType': 'otherInfo',
+            'yearBuilt': 'yearBuilt',
+            'squareFootage': 'squareFootage'
+        }
+        for k, prop in c_map.items():
+            val = str(client.get(k, '') or '').strip()
+            if val:
+                clean_val = val.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                c_lines.append(f'  <void property="{prop}"><string>{clean_val}</string></void>')
+        c_lines.extend(['</object>', '</java>'])
+        z.writestr("ClientInfo.xml", "\n".join(c_lines).encode('utf-8'))
 
-        # 2. Generate InspectionData.xml
+        # 2. Generate InspectionData.xml (Lossless HZF Studio standard)
         i_root = ET.Element("InspectionReport", created=datetime.datetime.now().isoformat(), version="2.0")
+        
+        # Embedded ClientInfo block
+        c_node = ET.SubElement(i_root, "ClientInfo")
+        for k, v in client.items():
+            child = ET.SubElement(c_node, k)
+            child.text = str(v or "")
+
         secs_elem = ET.SubElement(i_root, "Sections")
         
         photos_to_write = {}
@@ -623,14 +710,15 @@ def build_hzf_bytes(data: Dict[str, Any]) -> bytes:
 
                 photos_elem = ET.SubElement(item_elem, "Photos")
                 for p in item.get('photos', []):
-                    p_name = p.get('filename') or f"photo_{len(photos_to_write)+1}.jpg"
+                    raw_name = p.get('filename') or f"photo_{len(photos_to_write)+1}.jpg"
+                    p_name = os.path.basename(raw_name)
                     p_cap = p.get('caption', '')
                     ET.SubElement(photos_elem, "Photo", filename=p_name, caption=p_cap)
 
                     data_url = p.get('dataUrl', '')
-                    if ',' in data_url and p_name not in photos_to_write:
+                    if p_name not in photos_to_write and data_url:
                         try:
-                            b64 = data_url.split(',', 1)[1]
+                            b64 = data_url.split(',', 1)[1] if ',' in data_url else data_url
                             photos_to_write[p_name] = base64.b64decode(b64)
                         except Exception:
                             pass
@@ -645,7 +733,58 @@ def build_hzf_bytes(data: Dict[str, Any]) -> bytes:
         ET.SubElement(m_root, "ExportDate").text = datetime.datetime.now().isoformat()
         z.writestr("manifest.xml", ET.tostring(m_root, encoding='utf-8', xml_declaration=True))
 
-        # 4. Write all photos
+        # 4. Generate TabbedPanes.tpl
+        tpl_lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<java version="1.8.0_131" class="java.beans.XMLDecoder">', '<object class="homeinspectorpro.TemplateInfo">']
+        for sec in sections:
+            s_name = str(sec.get('name', '')).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            tpl_lines.append(f'  <void property="tabbedPaneName"><string>{s_name}</string></void>')
+        tpl_lines.extend(['</object>', '</java>'])
+        z.writestr("TabbedPanes.tpl", "\n".join(tpl_lines).encode('utf-8'))
+
+        # 5. Generate DamagePanels.xml
+        dmg_lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<java version="1.8.0_131" class="java.beans.XMLDecoder">']
+        for sec in sections:
+            for item in sec.get('items', []):
+                sec_name = str(sec.get('name', ''))
+                it_name = str(item.get('name', ''))
+                full_name = f"{sec_name}{it_name}".replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                st = item.get('status', 'Satisfactory')
+                comm = str(item.get('comments', '') or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+                dmg_lines.append('  <object class="homeinspectorpro.DamagePanelInfo">')
+                dmg_lines.append(f'    <void property="name"><string>{full_name}</string></void>')
+                if st in ['Safety Hazard', 'Defective']:
+                    note = comm if comm else st
+                    dmg_lines.append(f'    <void property="damageStatusRedVector"><void method="add"><string>{note}</string></void></void>')
+                elif st == 'Marginal':
+                    note = comm if comm else st
+                    dmg_lines.append(f'    <void property="damageStatusBlackVector"><void method="add"><string>{note}</string></void></void>')
+                elif comm:
+                    dmg_lines.append(f'    <void property="damageStatusVector"><void method="add"><string>{comm}</string></void></void>')
+                dmg_lines.append('  </object>')
+        dmg_lines.append('</java>')
+        z.writestr("DamagePanels.xml", "\n".join(dmg_lines).encode('utf-8'))
+
+        # 6. Generate PhotoInfo.xml
+        photo_lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<java version="1.8.0_131" class="java.beans.XMLDecoder">']
+        for sec in sections:
+            for item in sec.get('items', []):
+                for p in item.get('photos', []):
+                    p_name = p.get('filename') or ''
+                    p_cap = str(p.get('caption', '') or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    sec_clean = str(sec.get('name', '')).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    item_clean = str(item.get('name', '')).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    if p_name:
+                        photo_lines.append('  <object class="homeinspectorpro.PhotoInfo">')
+                        photo_lines.append(f'    <void property="fileName"><string>{p_name}</string></void>')
+                        photo_lines.append(f'    <void property="areaName"><string>{sec_clean}</string></void>')
+                        photo_lines.append(f'    <void property="itemName"><string>{item_clean}</string></void>')
+                        photo_lines.append(f'    <void property="caption"><string>{p_cap}</string></void>')
+                        photo_lines.append('  </object>')
+        photo_lines.append('</java>')
+        z.writestr("PhotoInfo.xml", "\n".join(photo_lines).encode('utf-8'))
+
+        # 7. Write all photos
         for p_name, p_bytes in photos_to_write.items():
             z.writestr(p_name, p_bytes)
 

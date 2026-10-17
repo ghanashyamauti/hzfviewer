@@ -8,6 +8,8 @@
 (function () {
   'use strict';
 
+  console.log("app.js build 2026-10-15T16:25:00-debug");
+
   const State = {
     isInspectionActive: false,
     activeReportId: null,
@@ -140,8 +142,9 @@
               </div>
               <div class="saved-report-actions">
                 <button class="btn btn-primary btn-sm" onclick="window.App.openSaved('${rep.id}')">Open</button>
-                <button class="btn btn-outline btn-sm" onclick="window.App.downloadSaved('${rep.id}', 'hzf')">.hzf</button>
-                <button class="btn btn-outline btn-sm" onclick="window.App.downloadSaved('${rep.id}', 'bin')">.bin</button>
+                <button class="btn btn-outline btn-sm" onclick="window.App.downloadSaved('${rep.id}', 'pdf')" title="Download exact PDF report">PDF</button>
+                <button class="btn btn-outline btn-sm" onclick="window.App.downloadSaved('${rep.id}', 'hzf')" title="Download .hzf archive">.hzf</button>
+                <button class="btn btn-outline btn-sm" onclick="window.App.downloadSaved('${rep.id}', 'bin')" title="Download .bin container">.bin</button>
                 <button class="btn btn-danger btn-sm" onclick="window.App.deleteSaved('${rep.id}')" title="Delete Report">&times;</button>
               </div>
             `;
@@ -800,7 +803,9 @@
             });
             const baseName = fname.split('/').pop().split('\\').pop();
             imageMap[baseName] = dataUrl;
+            imageMap[baseName.toLowerCase()] = dataUrl;
             imageMap[fname] = dataUrl;
+            imageMap[fname.toLowerCase()] = dataUrl;
           } else if (lower.endsWith('.xml') || lower.endsWith('.tpl') || lower.endsWith('.dat')) {
             const bName = fname.split('/').pop().split('\\').pop();
             const txt = await entry.async("text");
@@ -811,60 +816,107 @@
           }
         }
 
-        // Check if this is a native Home Inspector Pro archive (.bin or .hzf with TabbedPanes/DamagePanels/ClientInfo)
-        const isHipArchive = xmlFiles['tabbedpanes.tpl'] || xmlFiles['damagepanels.xml'] ||
-                             xmlFiles['clientinfo.xml'] || xmlFiles['photoinfo.xml'] ||
-                             xmlFiles['TabbedPanes.tpl'] || xmlFiles['DamagePanels.xml'];
+        // 1. Check if this archive has lossless HZF Studio InspectionData.xml first
+        const hasInspectionData = xmlFiles['inspectiondata.xml'] || xmlFiles['InspectionData.xml'] || xmlFiles['report.xml'];
 
-        if (isHipArchive) {
-          const hipParsed = parseHipFormatJs(xmlFiles, imageMap);
-          State.clientInfo = hipParsed.clientInfo || {};
-          State.sections = hipParsed.sections || [];
-        } else {
-          // Parse Generic / Standard Inspection XML
-          const clientXml = xmlFiles['ClientInfo.xml'] || xmlFiles['client.xml'] || Object.values(xmlFiles)[0] || '';
+        if (hasInspectionData) {
           State.clientInfo = {};
+
+          // Check embedded ClientInfo inside InspectionData.xml
+          const inspXml = hasInspectionData;
+          const dp = new DOMParser();
+          const inspDoc = dp.parseFromString(sanitizeXmlString(inspXml), "text/xml");
+
+          const embeddedClient = inspDoc.querySelector('ClientInfo') || inspDoc.querySelector('clientinfo');
+          if (embeddedClient) {
+            Array.from(embeddedClient.children).forEach(el => {
+              const val = el.textContent.trim();
+              if (val) {
+                State.clientInfo[el.tagName] = val;
+                const tLow = el.tagName.toLowerCase();
+                if (tLow.includes('address')) State.clientInfo.inspectionAddress = val;
+                else if (tLow.includes('clientname') || tLow === 'client') State.clientInfo.clientName = val;
+                else if (tLow.includes('phone')) State.clientInfo.clientPhone = val;
+                else if (tLow.includes('email')) State.clientInfo.clientEmail = val;
+                else if (tLow.includes('inspectorname') || tLow === 'inspector') State.clientInfo.inspectorName = val;
+                else if (tLow.includes('license')) State.clientInfo.inspectorLicense = val;
+                else if (tLow.includes('company')) State.clientInfo.inspectionCompany = val;
+                else if (tLow.includes('date')) State.clientInfo.inspectionDate = val;
+                else if (tLow.includes('time')) State.clientInfo.inspectionTime = val;
+                else if (tLow.includes('weather')) State.clientInfo.weather = val;
+                else if (tLow.includes('propertytype')) State.clientInfo.propertyType = val;
+                else if (tLow.includes('yearbuilt')) State.clientInfo.yearBuilt = val;
+                else if (tLow.includes('sqft') || tLow.includes('squarefootage')) State.clientInfo.squareFootage = val;
+              }
+            });
+          }
+
+          // Also check separate ClientInfo.xml (Java XMLDecoder or standard)
+          const clientXml = xmlFiles['ClientInfo.xml'] || xmlFiles['clientinfo.xml'] || xmlFiles['client.xml'] || '';
           if (clientXml) {
-            const dp = new DOMParser();
-            const doc = dp.parseFromString(sanitizeXmlString(clientXml), "text/xml");
-            const tags = ["clientName", "inspectionAddress", "inspectorName", "inspectionDate", "weather", "propertyType", "yearBuilt"];
+            const clientDoc = dp.parseFromString(sanitizeXmlString(clientXml), "text/xml");
+            // Check Java XMLDecoder <void property="...">
+            clientDoc.querySelectorAll('void[property]').forEach(v => {
+              const prop = v.getAttribute('property');
+              const str = (v.querySelector('string')?.textContent || v.textContent || '').trim();
+              if (str) {
+                if (prop === 'address') State.clientInfo.inspectionAddress = str;
+                else if (prop === 'firstName' || prop === 'clientName') State.clientInfo.clientName = str;
+                else if (prop === 'phone' || prop === 'clientPhone') State.clientInfo.clientPhone = str;
+                else if (prop === 'email' || prop === 'clientEmail') State.clientInfo.clientEmail = str;
+                else if (prop === 'inspectorName') State.clientInfo.inspectorName = str;
+                else if (prop === 'company' || prop === 'inspectionCompany') State.clientInfo.inspectionCompany = str;
+                else if (prop === 'license' || prop === 'inspectorLicense') State.clientInfo.inspectorLicense = str;
+                else if (prop === 'inspectionDate') State.clientInfo.inspectionDate = str;
+                else if (prop === 'inspectionTime') State.clientInfo.inspectionTime = str;
+                else if (prop === 'weather') State.clientInfo.weather = str;
+                else if (prop === 'otherInfo' || prop === 'propertyType') State.clientInfo.propertyType = str;
+                else if (prop === 'yearBuilt') State.clientInfo.yearBuilt = str;
+                else if (prop === 'squareFootage') State.clientInfo.squareFootage = str;
+              }
+            });
+
+            // Check standard tags
+            const tags = ["clientName", "inspectionAddress", "inspectorName", "inspectionCompany", "inspectorLicense", "inspectionDate", "inspectionTime", "weather", "propertyType", "yearBuilt", "squareFootage"];
             tags.forEach(t => {
-              const el = doc.querySelector(t) || doc.querySelector(t.toLowerCase());
-              if (el) State.clientInfo[t] = el.textContent.trim();
+              const el = clientDoc.querySelector(t) || clientDoc.querySelector(t.toLowerCase());
+              if (el && el.textContent.trim()) State.clientInfo[t] = el.textContent.trim();
             });
           }
 
-          const inspXml = xmlFiles['InspectionData.xml'] || xmlFiles['report.xml'];
           const parsedSections = [];
-
-          if (inspXml) {
-            const dp = new DOMParser();
-            const doc = dp.parseFromString(sanitizeXmlString(inspXml), "text/xml");
-            doc.querySelectorAll('Section').forEach((sNode, sIdx) => {
-              const sName = sNode.getAttribute('name') || sNode.querySelector('Name')?.textContent || `Section ${sIdx + 1}`;
-              const items = [];
-              sNode.querySelectorAll('Item').forEach((iNode, iIdx) => {
-                const iName = iNode.getAttribute('name') || iNode.querySelector('Name')?.textContent || `Item ${iIdx + 1}`;
-                const status = iNode.querySelector('Status')?.textContent || "Satisfactory";
-                const comments = iNode.querySelector('Comments')?.textContent || "";
-                const photos = [];
-                iNode.querySelectorAll('Photo').forEach(pNode => {
-                  const pFile = pNode.getAttribute('filename') || pNode.textContent.trim();
-                  const pCap = pNode.getAttribute('caption') || "";
-                  if (pFile && imageMap[pFile]) {
-                    photos.push({ filename: pFile, dataUrl: imageMap[pFile], caption: pCap });
-                  }
-                });
-                items.push({ id: `it_${sIdx}_${iIdx}`, name: iName, status, comments, photos });
+          inspDoc.querySelectorAll('Section').forEach((sNode, sIdx) => {
+            const sName = sNode.getAttribute('name') || sNode.querySelector('Name')?.textContent || `Section ${sIdx + 1}`;
+            const items = [];
+            sNode.querySelectorAll('Item').forEach((iNode, iIdx) => {
+              const iName = iNode.getAttribute('name') || iNode.querySelector('Name')?.textContent || `Item ${iIdx + 1}`;
+              const status = iNode.querySelector('Status')?.textContent || "Satisfactory";
+              const comments = iNode.querySelector('Comments')?.textContent || "";
+              const photos = [];
+              iNode.querySelectorAll('Photo').forEach(pNode => {
+                const pFile = pNode.getAttribute('filename') || pNode.textContent.trim();
+                const pCap = pNode.getAttribute('caption') || "";
+                const baseF = pFile ? pFile.split('/').pop().split('\\').pop() : '';
+                const dUrl = (
+                  imageMap[pFile] ||
+                  imageMap[baseF] ||
+                  imageMap[pFile.toLowerCase()] ||
+                  imageMap[baseF.toLowerCase()] ||
+                  ""
+                );
+                if (pFile || baseF) {
+                  photos.push({ filename: baseF || pFile, dataUrl: dUrl, caption: pCap });
+                }
               });
-              parsedSections.push({
-                id: `sec_${sIdx}`,
-                name: sName,
-                desc: sNode.querySelector('Summary')?.textContent || "",
-                items: items
-              });
+              items.push({ id: `it_${sIdx}_${iIdx}`, name: iName, status, comments, photos });
             });
-          }
+            parsedSections.push({
+              id: `sec_${sIdx}`,
+              name: sName,
+              desc: sNode.querySelector('Summary')?.textContent || "",
+              items: items
+            });
+          });
 
           State.sections = parsedSections.length > 0 ? parsedSections : [
             {
@@ -880,6 +932,11 @@
               }))
             }
           ];
+        } else {
+          // Fallback to native Home Inspector Pro format
+          const hipResult = parseHomeInspectorProZip(xmlFiles, imageMap);
+          State.clientInfo = hipResult.clientInfo || {};
+          State.sections = hipResult.sections || [];
         }
 
         State.activeSectionId = State.sections[0] ? State.sections[0].id : null;
@@ -891,57 +948,6 @@
     }
   }
 
-  // Export File (supports both .hzf and .bin)
-  async function exportFile(format = 'hzf') {
-    syncFormToState();
-    const isBin = (format === 'bin');
-    const endpoint = isBin ? '/api/export-bin' : '/api/export-hzf';
-    let outName = State.fileName || "Inspection_Report";
-    outName = outName.replace(/\.[^/.]+$/, "") + (isBin ? '.bin' : '.hzf');
-
-    showToast(`Generating ${outName}...`);
-
-    try {
-      const resp = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: State.activeReportId,
-          fileName: outName,
-          clientInfo: State.clientInfo,
-          sections: State.sections
-        })
-      });
-
-      if (resp.ok) {
-        const blob = await resp.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = outName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        showToast(`Saved ${outName}!`);
-        return;
-      }
-    } catch (e) {
-      console.log("Backend export failed, attempting client-side fallback...");
-    }
-
-    // Client-side fallback if backend unavailable
-    if (window.JSZip) {
-      const zip = new JSZip();
-      zip.file("ClientInfo.xml", `<ClientData><Address>${State.clientInfo.inspectionAddress || ''}</Address></ClientData>`);
-      const blob = await zip.generateAsync({ type: "blob" });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = outName;
-      a.click();
-      showToast(`Saved ${outName}!`);
-    }
-  }
 
   // Update Metrics
   function updateMetrics() {
@@ -1053,6 +1059,7 @@
           </div>
           <textarea class="clean-textarea" id="notes_${item.id}"
             placeholder="Add inspector notes, defect findings, or repair recommendations..."
+            oninput="window.App.setComments('${sec.id}', '${item.id}', this.value)"
             onchange="window.App.setComments('${sec.id}', '${item.id}', this.value)">${item.comments || ''}</textarea>
         </div>
 
@@ -1072,23 +1079,50 @@
     if (window.lucide) lucide.createIcons();
   }
 
+  // XML character escaping for 100% valid XML exports
+  function escapeXml(unsafe) {
+    if (unsafe == null) return '';
+    return String(unsafe).replace(/[<>&'"]/g, c => {
+      switch (c) {
+        case '<': return '&lt;';
+        case '>': return '&gt;';
+        case '&': return '&amp;';
+        case '\'': return '&apos;';
+        case '"': return '&quot;';
+      }
+    });
+  }
+
   // Sync Form Input fields to State
   function syncFormToState() {
     State.clientInfo = {
-      inspectionAddress: document.getElementById('formAddress')?.value || '',
-      propertyType: document.getElementById('formPropertyType')?.value || '',
-      yearBuilt: document.getElementById('formYearBuilt')?.value || '',
-      squareFootage: document.getElementById('formSqFt')?.value || '',
-      weather: document.getElementById('formWeather')?.value || '',
-      clientName: document.getElementById('formClientName')?.value || '',
-      clientPhone: document.getElementById('formClientPhone')?.value || '',
-      clientEmail: document.getElementById('formClientEmail')?.value || '',
-      inspectionDate: document.getElementById('formInspectionDate')?.value || '',
-      inspectionTime: document.getElementById('formInspectionTime')?.value || '',
-      inspectorName: document.getElementById('formInspectorName')?.value || '',
-      inspectorLicense: document.getElementById('formInspectorLicense')?.value || '',
-      inspectionCompany: document.getElementById('formCompanyName')?.value || ''
+      ...(State.clientInfo || {}),
+      inspectionAddress: document.getElementById('formAddress')?.value || State.clientInfo?.inspectionAddress || '',
+      propertyType: document.getElementById('formPropertyType')?.value || State.clientInfo?.propertyType || '',
+      yearBuilt: document.getElementById('formYearBuilt')?.value || State.clientInfo?.yearBuilt || '',
+      squareFootage: document.getElementById('formSqFt')?.value || State.clientInfo?.squareFootage || '',
+      weather: document.getElementById('formWeather')?.value || State.clientInfo?.weather || '',
+      clientName: document.getElementById('formClientName')?.value || State.clientInfo?.clientName || '',
+      clientPhone: document.getElementById('formClientPhone')?.value || State.clientInfo?.clientPhone || '',
+      clientEmail: document.getElementById('formClientEmail')?.value || State.clientInfo?.clientEmail || '',
+      inspectionDate: document.getElementById('formInspectionDate')?.value || State.clientInfo?.inspectionDate || '',
+      inspectionTime: document.getElementById('formInspectionTime')?.value || State.clientInfo?.inspectionTime || '',
+      inspectorName: document.getElementById('formInspectorName')?.value || State.clientInfo?.inspectorName || '',
+      inspectorLicense: document.getElementById('formInspectorLicense')?.value || State.clientInfo?.inspectorLicense || '',
+      inspectionCompany: document.getElementById('formCompanyName')?.value || State.clientInfo?.inspectionCompany || ''
     };
+
+    // Also sync all visible note textareas so in-progress notes are never lost
+    document.querySelectorAll('textarea[id^="notes_"]').forEach(ta => {
+      const itemId = ta.id.replace('notes_', '');
+      for (const s of (State.sections || [])) {
+        const it = (s.items || []).find(i => i.id === itemId);
+        if (it) {
+          it.comments = ta.value;
+          break;
+        }
+      }
+    });
   }
 
   // Render Property Info Form
@@ -1123,15 +1157,12 @@
     document.getElementById('activeFilePill').textContent = State.fileName || "Inspection";
   }
 
-  // Render Printable Report
-  function renderReport() {
-    const sheet = document.getElementById('reportSheet');
-    if (!sheet) return;
-
-    const c = State.clientInfo || {};
+  // Pure function to generate clean, consistent inspection report HTML
+  function generateReportHtml(clientInfo, sections) {
+    const c = clientInfo || {};
     let secHtml = '';
 
-    State.sections.forEach(sec => {
+    (sections || []).forEach(sec => {
       secHtml += `<div class="report-sec-head">${sec.name}</div>`;
 
       (sec.items || []).forEach(it => {
@@ -1144,12 +1175,14 @@
         if (it.photos && it.photos.length > 0) {
           photosGrid += `<div class="report-photos-grid">`;
           it.photos.forEach(p => {
-            photosGrid += `
-              <div class="report-photo-box">
-                <img src="${p.dataUrl}" alt="${p.filename}">
-                <div class="report-photo-caption">${p.caption || it.name}</div>
-              </div>
-            `;
+            if (p.dataUrl) {
+              photosGrid += `
+                <div class="report-photo-box">
+                  <img src="${p.dataUrl}" alt="${p.filename || 'Inspection Photo'}">
+                  <div class="report-photo-caption">${p.caption || it.name}</div>
+                </div>
+              `;
+            }
           });
           photosGrid += `</div>`;
         }
@@ -1167,7 +1200,7 @@
       });
     });
 
-    sheet.innerHTML = `
+    return `
       <div class="report-sheet-head">
         <div>
           <h1 class="report-sheet-title">HOME INSPECTION REPORT</h1>
@@ -1196,6 +1229,13 @@
 
       ${secHtml}
     `;
+  }
+
+  // Render Printable Report inside workspace tab
+  function renderReport() {
+    const sheet = document.getElementById('reportSheet');
+    if (!sheet) return;
+    sheet.innerHTML = generateReportHtml(State.clientInfo, State.sections);
   }
 
   function renderAll() {
@@ -1292,6 +1332,10 @@
         if (resp.ok) {
           const json = await resp.json();
           if (json.success && json.data) {
+            if (format === 'pdf') {
+              await downloadPdfReport(json.data);
+              return;
+            }
             const endpoint = (format === 'bin') ? '/api/export-bin' : '/api/export-hzf';
             const dlResp = await fetch(apiUrl(endpoint), {
               method: 'POST',
@@ -1690,86 +1734,319 @@
     }
   }
 
-  // Direct PDF Report Downloader
-  async function downloadPdfReport() {
-    showToast("Preparing PDF report...");
-    syncFormToState();
+  // Direct PDF Report Downloader (jsPDF vector rendering — no html2canvas)
+  async function downloadPdfReport(targetData = null) {
+    showToast("Generating PDF report...");
 
-    // 1. Remember user's current active tab so we can restore it seamlessly
-    const currentActiveTab = document.querySelector('.nav-tab.active')?.getAttribute('data-tab') || 'checklist';
-    const tabReport = document.getElementById('tabReport');
-    const tabChecklist = document.getElementById('tabChecklist');
-    const tabProperty = document.getElementById('tabProperty');
+    let clientInfo, sections, fileName;
+    if (targetData) {
+      clientInfo = targetData.clientInfo || {};
+      sections = targetData.sections || [];
+      fileName = targetData.fileName || 'Inspection_Report';
+    } else {
+      syncFormToState();
+      clientInfo = State.clientInfo || {};
+      sections = State.sections || [];
+      fileName = State.fileName || 'Inspection_Report';
+    }
 
-    // 2. Temporarily switch to the Report Preview tab so all CSS layout, table widths, and dimensions are fully computed
-    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-    document.querySelector('.nav-tab[data-tab="report"]')?.classList.add('active');
+    const cleanBase = (fileName || 'Inspection_Report').replace(/\.[^/.]+$/, "");
+    const pdfFilename = `${cleanBase}_Report.pdf`;
 
-    if (tabChecklist) tabChecklist.style.display = 'none';
-    if (tabProperty) tabProperty.style.display = 'none';
-    if (tabReport) tabReport.style.display = 'block';
+    // [STEP 2b] Log at the start
+    const jsPDFClass = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+    console.log("DEBUG: jsPDF check:", {
+      typeof_window_jspdf: typeof window.jspdf,
+      typeof_window_jspdf_jsPDF: typeof window.jspdf?.jsPDF,
+      typeof_window_jsPDF: typeof window.jsPDF,
+      jsPDF_version: window.jspdf?.version || jsPDFClass?.version || "unknown"
+    });
 
-    // 3. Render the fresh report sheet
-    renderReport();
-
-    const reportElem = document.getElementById('reportSheet');
-    if (!reportElem) {
-      showToast("Report sheet not found");
+    if (!jsPDFClass) {
+      const err = new Error("jsPDF library is not loaded or missing on window");
+      console.error("DEBUG: Missing jsPDF fallback error:", err.stack);
+      showToast("Error: " + err.message);
       return;
     }
 
-    // 4. Wait for DOM paint and images to decode
-    await new Promise(r => setTimeout(r, 400));
+    // [STEP 2c] Log the input
+    const allItems = (sections || []).flatMap(s => s.items || []);
+    const allPhotosWithDataUrl = allItems.flatMap(i => (i.photos || []).filter(p => !!p.dataUrl));
+    console.log("DEBUG: PDF Input Data:", {
+      numberOfSections: (sections || []).length,
+      totalNumberOfItems: allItems.length,
+      numberOfPhotosWithDataUrl: allPhotosWithDataUrl.length,
+      first3Photos: allPhotosWithDataUrl.slice(0, 3).map((p, idx) => ({
+        index: idx,
+        dataUrlPrefix: (p.dataUrl || '').substring(0, 30),
+        dataUrlLength: (p.dataUrl || '').length
+      }))
+    });
 
-    // Ensure report element has visible dimensions
-    if (reportElem.offsetHeight === 0) {
-      reportElem.style.display = 'block';
-      reportElem.style.visibility = 'visible';
-    }
+    try {
+      const pdf = new jsPDFClass({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageW = pdf.internal.pageSize.getWidth();   // ~210
+      const pageH = pdf.internal.pageSize.getHeight();  // ~297
+      const M = 15; // margin
+      const cW = pageW - M * 2; // content width ~180
+      let y = M;
 
-    const cleanBase = (State.fileName || 'Inspection_Report').replace(/\.[^/.]+$/, "");
-    const pdfFilename = `${cleanBase}_Report.pdf`;
+      // Colors
+      const BLACK = [15, 23, 42];
+      const GRAY = [100, 116, 139];
+      const LIGHT = [226, 232, 240];
+      const ACCENT = [99, 102, 241];
+      const WHITE = [255, 255, 255];
+      const BG_LIGHT = [248, 250, 252];
 
-    if (window.html2pdf) {
-      showToast("Rendering PDF document...");
-      // Dynamically calculate scale so the rendered canvas NEVER exceeds browser's 65,535px maximum limit
-      const elemHeight = Math.max(reportElem.scrollHeight, reportElem.offsetHeight, 1000);
-      const safeScale = Math.min(1.8, Math.max(1.0, 48000 / elemHeight));
-
-      const opt = {
-        margin: [10, 10, 10, 10],
-        filename: pdfFilename,
-        image: { type: 'jpeg', quality: 0.95 },
-        html2canvas: {
-          scale: safeScale,
-          useCORS: true,
-          logging: false,
-          backgroundColor: '#ffffff'
-        },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        pagebreak: { mode: ['css', 'legacy'] }
+      const STATUS_COLORS = {
+        'Safety Hazard': { border: [225, 29, 72], bg: [255, 241, 242] },
+        'Safety': { border: [225, 29, 72], bg: [255, 241, 242] },
+        'Defective': { border: [234, 88, 12], bg: [255, 247, 237] },
+        'Defects': { border: [234, 88, 12], bg: [255, 247, 237] },
+        'Marginal': { border: [217, 119, 6], bg: [255, 251, 235] },
+        'Satisfactory': { border: [22, 163, 74], bg: [240, 253, 244] },
+        'Good': { border: [22, 163, 74], bg: [240, 253, 244] },
+        'Not Inspected': { border: [148, 163, 184], bg: [248, 250, 252] },
+        'Not Present': { border: [148, 163, 184], bg: [248, 250, 252] },
       };
 
-      try {
-        await html2pdf().set(opt).from(reportElem).save();
-        showToast(`✅ Downloaded ${pdfFilename}!`);
-
-        // If user was on another tab, restore it after a short delay
-        if (currentActiveTab !== 'report') {
-          setTimeout(() => {
-            const prevTabBtn = document.querySelector(`.nav-tab[data-tab="${currentActiveTab}"]`);
-            if (prevTabBtn) prevTabBtn.click();
-          }, 800);
+      function checkPage(needed) {
+        if (y + needed > pageH - M) {
+          pdf.addPage();
+          y = M;
+          return true;
         }
-        return;
-      } catch (err) {
-        console.warn("Direct html2pdf export failed, switching to native vector print fallback:", err);
+        return false;
       }
-    }
 
-    // High-fidelity fallback: Browser native vector print to PDF
-    showToast("Opening Print / Save as PDF dialog...");
-    setTimeout(() => window.print(), 300);
+      // Helper: wrap text and return lines
+      function getLines(text, maxWidth, fontSize) {
+        pdf.setFontSize(fontSize);
+        return pdf.splitTextToSize(text || '', maxWidth);
+      }
+
+      // ========== HEADER ==========
+      pdf.setFillColor(...ACCENT);
+      pdf.rect(0, 0, pageW, 28, 'F');
+      pdf.setTextColor(...WHITE);
+      pdf.setFontSize(18);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text('HOME INSPECTION REPORT', M, 13);
+      pdf.setFontSize(9);
+      pdf.setFont('helvetica', 'normal');
+      const company = clientInfo.inspectionCompany || 'Inspection Services';
+      const license = clientInfo.inspectorLicense || '';
+      pdf.text(`${company}${license ? '  •  ' + license : ''}`, M, 20);
+
+      // Date & Inspector on right
+      pdf.setFontSize(9);
+      const dateStr = `Date: ${clientInfo.inspectionDate || 'N/A'}`;
+      const inspStr = `Inspector: ${clientInfo.inspectorName || 'N/A'}`;
+      pdf.text(dateStr, pageW - M, 13, { align: 'right' });
+      pdf.text(inspStr, pageW - M, 20, { align: 'right' });
+
+      y = 35;
+
+      // ========== CLIENT INFO TABLE ==========
+      const c = clientInfo;
+      const infoRows = [
+        ['Client', c.clientName || 'N/A', 'Address', c.inspectionAddress || 'N/A'],
+        ['Property Type', c.propertyType || 'Residential', 'Year / SqFt',
+          `${c.yearBuilt || 'N/A'}  •  ${c.squareFootage || 'N/A'}`]
+      ];
+
+      pdf.setDrawColor(...LIGHT);
+      pdf.setFillColor(...BG_LIGHT);
+
+      const colWidths = [32, cW / 2 - 32, 32, cW / 2 - 32];
+      const rowH = 8;
+
+      infoRows.forEach(row => {
+        checkPage(rowH + 2);
+        let x = M;
+        row.forEach((cell, ci) => {
+          if (ci % 2 === 0) {
+            // Label cell
+            pdf.setFillColor(...BG_LIGHT);
+            pdf.rect(x, y, colWidths[ci], rowH, 'FD');
+            pdf.setFont('helvetica', 'bold');
+            pdf.setFontSize(8);
+            pdf.setTextColor(...BLACK);
+            pdf.text(cell, x + 2, y + 5.5);
+          } else {
+            // Value cell
+            pdf.setFillColor(...WHITE);
+            pdf.rect(x, y, colWidths[ci], rowH, 'FD');
+            pdf.setFont('helvetica', 'normal');
+            pdf.setFontSize(8);
+            pdf.setTextColor(...BLACK);
+            const valLines = pdf.splitTextToSize(cell, colWidths[ci] - 4);
+            pdf.text(valLines[0] || '', x + 2, y + 5.5);
+          }
+          x += colWidths[ci];
+        });
+        y += rowH;
+      });
+
+      y += 8;
+
+      // ========== SECTIONS & ITEMS ==========
+      (sections || []).forEach(sec => {
+        // Section header
+        checkPage(14);
+        pdf.setFillColor(...ACCENT);
+        pdf.rect(M, y, cW, 9, 'F');
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(11);
+        pdf.setTextColor(...WHITE);
+        pdf.text(sec.name || 'Section', M + 4, y + 6.5);
+        y += 12;
+
+        (sec.items || []).forEach(it => {
+          const status = it.status || 'Not Inspected';
+          const sc = STATUS_COLORS[status] || STATUS_COLORS['Not Inspected'];
+          const comments = it.comments || '';
+          const photos = (it.photos || []).filter(p => p.dataUrl);
+
+          // Calculate needed height
+          const commentLines = comments ? getLines(comments, cW - 14, 8) : [];
+          let itemH = 10; // title row
+          if (commentLines.length > 0) itemH += commentLines.length * 3.5 + 2;
+          if (photos.length > 0) itemH += 45; // photo row height
+
+          checkPage(Math.min(itemH + 4, 80)); // don't exceed page
+
+          // Item background
+          pdf.setFillColor(...sc.bg);
+          const bgH = Math.min(itemH, pageH - M - y);
+          pdf.rect(M, y, cW, bgH, 'F');
+
+          // Left border
+          pdf.setFillColor(...sc.border);
+          pdf.rect(M, y, 2.5, bgH, 'F');
+
+          // Item name
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(9);
+          pdf.setTextColor(...BLACK);
+          pdf.text(it.name || 'Item', M + 6, y + 6);
+
+          // Status badge
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(7);
+          pdf.setTextColor(...sc.border);
+          pdf.text(status.toUpperCase(), pageW - M - 4, y + 6, { align: 'right' });
+
+          y += 10;
+
+          // Comments
+          if (commentLines.length > 0) {
+            pdf.setFont('helvetica', 'normal');
+            pdf.setFontSize(8);
+            pdf.setTextColor(51, 65, 85);
+            commentLines.forEach(line => {
+              checkPage(5);
+              pdf.text(line, M + 6, y);
+              y += 3.5;
+            });
+            y += 1;
+          }
+
+          // Photos
+          if (photos.length > 0) {
+            let px = M + 6;
+            const photoW = (cW - 16) / Math.min(photos.length, 3);
+            const photoH = 38;
+
+            checkPage(photoH + 6);
+
+            photos.slice(0, 6).forEach((p, pi) => {
+              if (pi > 0 && pi % 3 === 0) {
+                // New row
+                px = M + 6;
+                y += photoH + 4;
+                checkPage(photoH + 6);
+              }
+
+              try {
+                // Determine image format from dataUrl
+                let fmt = 'JPEG';
+                if (p.dataUrl.includes('image/png')) fmt = 'PNG';
+
+                pdf.addImage(p.dataUrl, fmt, px, y, photoW - 4, photoH - 6);
+
+                // Caption
+                pdf.setFont('helvetica', 'italic');
+                pdf.setFontSize(6);
+                pdf.setTextColor(...GRAY);
+                const caption = (p.caption || p.filename || it.name || '').substring(0, 30);
+                pdf.text(caption, px, y + photoH - 4);
+              } catch (imgErr) {
+                // [STEP 2e] Wrap each pdf.addImage call to log real error
+                console.error("DEBUG: pdf.addImage failed:", {
+                  format: p.dataUrl.includes('image/png') ? 'PNG' : 'JPEG',
+                  dataUrlPrefix: (p.dataUrl || '').substring(0, 30),
+                  dataUrlLength: (p.dataUrl || '').length,
+                  errorMessage: imgErr.message,
+                  errorStack: imgErr.stack
+                });
+                pdf.setFont('helvetica', 'italic');
+                pdf.setFontSize(7);
+                pdf.setTextColor(...GRAY);
+                pdf.text('[Image Error]', px + 2, y + 10);
+              }
+
+              px += photoW;
+            });
+
+            y += photoH + 2;
+          }
+
+          y += 3; // gap between items
+        });
+
+        y += 4; // gap between sections
+      });
+
+      // ========== FOOTER LINE ==========
+      checkPage(15);
+      y += 5;
+      pdf.setDrawColor(...LIGHT);
+      pdf.line(M, y, pageW - M, y);
+      y += 5;
+      pdf.setFont('helvetica', 'italic');
+      pdf.setFontSize(7);
+      pdf.setTextColor(...GRAY);
+      pdf.text(`Generated by HZF Inspector Studio  •  ${new Date().toLocaleDateString()}`, M, y);
+
+      // Add page numbers
+      const totalPages = pdf.internal.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        pdf.setPage(i);
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(7);
+        pdf.setTextColor(...GRAY);
+        pdf.text(`Page ${i} of ${totalPages}`, pageW - M, pageH - 8, { align: 'right' });
+      }
+
+      // [STEP 2d] Log right before pdf.save()
+      const blobSize = pdf.output('blob').size;
+      const finalPages = pdf.internal.getNumberOfPages();
+      console.log("DEBUG: PDF Pre-Save Stats:", {
+        numberOfPages: finalPages,
+        finalValueOfY: y,
+        blobSizeBytes: blobSize
+      });
+
+      pdf.save(pdfFilename);
+      showToast(`✅ Downloaded ${pdfFilename}!`);
+
+    } catch (err) {
+      // [STEP 2a] Remove window.print fallback, log full stack and show toast with err.message
+      console.error("DEBUG: PDF generation exception caught:", err.stack || err);
+      showToast(`PDF Error: ${err.message}`);
+    }
   }
 
   // Fast Export for .hzf and .bin containers
@@ -1793,13 +2070,17 @@
           inspectionAddress: 'address',
           inspectorName: 'inspectorName',
           inspectionCompany: 'company',
+          inspectorLicense: 'license',
           inspectionDate: 'inspectionDate',
+          inspectionTime: 'inspectionTime',
           weather: 'weather',
-          propertyType: 'otherInfo'
+          propertyType: 'otherInfo',
+          yearBuilt: 'yearBuilt',
+          squareFootage: 'squareFootage'
         };
         for (const [k, prop] of Object.entries(cMap)) {
           if (State.clientInfo[k]) {
-            clientXml += `  <void property="${prop}"><string>${State.clientInfo[k]}</string></void>\n`;
+            clientXml += `  <void property="${prop}"><string>${escapeXml(State.clientInfo[k])}</string></void>\n`;
           }
         }
         clientXml += `</object>\n</java>`;
@@ -1808,7 +2089,7 @@
         // 2. TabbedPanes.tpl
         let tplXml = `<?xml version="1.0" encoding="UTF-8"?>\n<java version="1.8.0_131" class="java.beans.XMLDecoder">\n<object class="homeinspectorpro.TemplateInfo">\n`;
         (State.sections || []).forEach(sec => {
-          tplXml += `  <void property="tabbedPaneName"><string>${sec.name}</string></void>\n`;
+          tplXml += `  <void property="tabbedPaneName"><string>${escapeXml(sec.name)}</string></void>\n`;
         });
         tplXml += `</object>\n</java>`;
         zip.file("TabbedPanes.tpl", tplXml);
@@ -1819,13 +2100,13 @@
           (sec.items || []).forEach(it => {
             const fullName = `${sec.name}${it.name}`;
             dmgXml += `  <object class="homeinspectorpro.DamagePanelInfo">\n`;
-            dmgXml += `    <void property="name"><string>${fullName}</string></void>\n`;
+            dmgXml += `    <void property="name"><string>${escapeXml(fullName)}</string></void>\n`;
             if (it.status === 'Safety Hazard' || it.status === 'Defective') {
-              dmgXml += `    <void property="damageStatusRedVector"><void method="add"><string>${it.comments || it.status}</string></void></void>\n`;
+              dmgXml += `    <void property="damageStatusRedVector"><void method="add"><string>${escapeXml(it.comments || it.status)}</string></void></void>\n`;
             } else if (it.status === 'Marginal') {
-              dmgXml += `    <void property="damageStatusBlackVector"><void method="add"><string>${it.comments || it.status}</string></void></void>\n`;
+              dmgXml += `    <void property="damageStatusBlackVector"><void method="add"><string>${escapeXml(it.comments || it.status)}</string></void></void>\n`;
             } else if (it.comments) {
-              dmgXml += `    <void property="damageStatusVector"><void method="add"><string>${it.comments}</string></void></void>\n`;
+              dmgXml += `    <void property="damageStatusVector"><void method="add"><string>${escapeXml(it.comments)}</string></void></void>\n`;
             }
             dmgXml += `  </object>\n`;
           });
@@ -1837,36 +2118,56 @@
         let photoXml = `<?xml version="1.0" encoding="UTF-8"?>\n<java version="1.8.0_131" class="java.beans.XMLDecoder">\n`;
         const writtenPhotos = new Set();
 
-        (State.sections || []).forEach(sec => {
-          (sec.items || []).forEach(it => {
-            (it.photos || []).forEach(p => {
-              const fname = p.filename || `photo_${writtenPhotos.size + 1}.jpg`;
+        for (const sec of (State.sections || [])) {
+          for (const it of (sec.items || [])) {
+            for (const p of (it.photos || [])) {
+              const rawName = p.filename || `photo_${writtenPhotos.size + 1}.jpg`;
+              const cleanFname = rawName.split('/').pop().split('\\').pop();
               photoXml += `  <object class="homeinspectorpro.PhotoInfo">\n`;
-              photoXml += `    <void property="fileName"><string>${fname}</string></void>\n`;
-              photoXml += `    <void property="areaName"><string>${sec.name}</string></void>\n`;
-              photoXml += `    <void property="itemName"><string>${it.name}</string></void>\n`;
-              photoXml += `    <void property="caption"><string>${p.caption || ''}</string></void>\n`;
+              photoXml += `    <void property="fileName"><string>${escapeXml(cleanFname)}</string></void>\n`;
+              photoXml += `    <void property="areaName"><string>${escapeXml(sec.name)}</string></void>\n`;
+              photoXml += `    <void property="itemName"><string>${escapeXml(it.name)}</string></void>\n`;
+              photoXml += `    <void property="caption"><string>${escapeXml(p.caption || '')}</string></void>\n`;
               photoXml += `  </object>\n`;
 
-              if (p.dataUrl && !writtenPhotos.has(fname)) {
-                writtenPhotos.add(fname);
-                const base64Data = p.dataUrl.includes(',') ? p.dataUrl.split(',')[1] : p.dataUrl;
-                zip.file(fname, base64Data, { base64: true });
+              if (p.dataUrl && !writtenPhotos.has(cleanFname)) {
+                writtenPhotos.add(cleanFname);
+                if (p.dataUrl.includes(',')) {
+                  const base64Data = p.dataUrl.split(',')[1];
+                  zip.file(cleanFname, base64Data, { base64: true });
+                } else if (p.dataUrl.startsWith('blob:') || p.dataUrl.startsWith('http')) {
+                  try {
+                    const imgResp = await fetch(p.dataUrl);
+                    const imgBlob = await imgResp.blob();
+                    zip.file(cleanFname, imgBlob);
+                  } catch (e) {
+                    console.warn("Failed to fetch photo blob:", e);
+                  }
+                } else {
+                  zip.file(cleanFname, p.dataUrl, { base64: true });
+                }
               }
-            });
-          });
-        });
+            }
+          }
+        }
         photoXml += `</java>`;
         zip.file("PhotoInfo.xml", photoXml);
 
-        // 5. Standard InspectionData.xml for cross-compatibility
-        let inspXml = `<InspectionReport created="${new Date().toISOString()}"><Sections>`;
+        // 5. Standard InspectionData.xml for 100% lossless cross-compatibility
+        let inspXml = `<InspectionReport created="${new Date().toISOString()}" version="2.0">`;
+        inspXml += `<ClientInfo>`;
+        for (const [k, v] of Object.entries(State.clientInfo || {})) {
+          if (v) inspXml += `<${k}>${escapeXml(String(v))}</${k}>`;
+        }
+        inspXml += `</ClientInfo>`;
+        inspXml += `<Sections>`;
         (State.sections || []).forEach(s => {
-          inspXml += `<Section id="${s.id}" name="${s.name}"><Summary>${s.desc||s.summary||''}</Summary><Items>`;
+          inspXml += `<Section id="${escapeXml(s.id)}" name="${escapeXml(s.name)}"><Summary>${escapeXml(s.desc||s.summary||'')}</Summary><Items>`;
           (s.items || []).forEach(it => {
-            inspXml += `<Item id="${it.id}" name="${it.name}"><Status>${it.status}</Status><Comments>${it.comments||''}</Comments><Photos>`;
+            inspXml += `<Item id="${escapeXml(it.id)}" name="${escapeXml(it.name)}"><Status>${escapeXml(it.status || 'Satisfactory')}</Status><Comments>${escapeXml(it.comments||'')}</Comments><Photos>`;
             (it.photos || []).forEach(p => {
-              inspXml += `<Photo filename="${p.filename}" caption="${p.caption||''}"/>`;
+              const cleanFname = (p.filename || '').split('/').pop().split('\\').pop();
+              inspXml += `<Photo filename="${escapeXml(cleanFname)}" caption="${escapeXml(p.caption||'')}"/>`;
             });
             inspXml += `</Photos></Item>`;
           });
@@ -2029,8 +2330,12 @@
 
     // Save and Export Triggers
     document.getElementById('btnSaveToLibrary')?.addEventListener('click', saveActiveReport);
+    document.getElementById('btnSavePdf')?.addEventListener('click', () => downloadPdfReport());
     document.getElementById('btnSaveHzf')?.addEventListener('click', () => exportFile('hzf'));
     document.getElementById('btnSaveBin')?.addEventListener('click', () => exportFile('bin'));
+
+    // In Report Tab: Direct PDF download
+    document.getElementById('btnDownloadPdfTab')?.addEventListener('click', () => downloadPdfReport());
 
     const printRepBtn = document.getElementById('btnPrintReport');
     if (printRepBtn) {
@@ -2041,7 +2346,7 @@
     }
 
     const printPdfOld = document.getElementById('btnPrintPdf');
-    if (printPdfOld) printPdfOld.addEventListener('click', downloadPdfReport);
+    if (printPdfOld) printPdfOld.addEventListener('click', () => downloadPdfReport());
 
     // Export Dropdown Menu Trigger
     const exportContainer = document.getElementById('exportMenuContainer');

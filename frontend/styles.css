@@ -2876,3 +2876,156 @@ body {
     gap: 0.15rem !important;
   }
 }
+
+/* ==========================================================================
+   FAITHFUL VECTOR/CANVAS PRINTING FOR PDF EXPORT
+   Standardized 794px width (standard A4 at 96 DPI) ensures exact desktop layout
+   regardless of whether user is on mobile, tablet, or dark mode.
+   ========================================================================== */
+.report-print-canvas {
+  position: absolute !important;
+  left: -9999px !important;
+  top: 0 !important;
+  width: 794px !important;
+  min-width: 794px !important;
+  max-width: 794px !important;
+  background: #ffffff !important;
+  color: #0f172a !important;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  padding: 32px !important;
+  box-sizing: border-box !important;
+  border: none !important;
+  box-shadow: none !important;
+  z-index: -1 !important;
+  overflow: visible !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.report-print-canvas .report-sheet-head {
+  border-bottom: 2px solid #0f172a !important;
+  padding-bottom: 1rem !important;
+  margin-bottom: 1.5rem !important;
+  display: flex !important;
+  justify-content: space-between !important;
+  flex-direction: row !important;
+  align-items: flex-start !important;
+}
+
+.report-print-canvas .report-sheet-title {
+  font-size: 1.5rem !important;
+  font-weight: 800 !important;
+  color: #0f172a !important;
+  margin: 0 !important;
+}
+
+.report-print-canvas .report-sheet-sub {
+  font-size: 0.8125rem !important;
+  color: #64748b !important;
+  margin-top: 0.25rem !important;
+}
+
+.report-print-canvas .report-table {
+  width: 100% !important;
+  border-collapse: collapse !important;
+  margin-bottom: 1.75rem !important;
+  font-size: 0.8125rem !important;
+}
+
+.report-print-canvas .report-table td {
+  padding: 0.45rem 0.65rem !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  color: #0f172a !important;
+  break-inside: avoid !important;
+  page-break-inside: avoid !important;
+}
+
+.report-print-canvas .report-table td.strong {
+  font-weight: 700 !important;
+  background-color: #f8fafc !important;
+  width: 25% !important;
+  color: #0f172a !important;
+}
+
+.report-print-canvas .report-sec-head {
+  font-size: 1.1rem !important;
+  font-weight: 700 !important;
+  margin: 1.5rem 0 0.75rem 0 !important;
+  padding-bottom: 0.35rem !important;
+  border-bottom: 1px solid #cbd5e1 !important;
+  color: #0f172a !important;
+  break-after: avoid !important;
+  page-break-after: avoid !important;
+}
+
+.report-print-canvas .report-row {
+  margin-bottom: 0.85rem !important;
+  padding: 0.65rem 0.85rem !important;
+  border-radius: 4px !important;
+  background-color: #f8fafc !important;
+  border-left: 3px solid #cbd5e1 !important;
+  break-inside: avoid !important;
+  page-break-inside: avoid !important;
+}
+
+.report-print-canvas .report-row.row-hazard {
+  border-left-color: #e11d48 !important;
+  background: #fff1f2 !important;
+}
+
+.report-print-canvas .report-row.row-defect {
+  border-left-color: #ea580c !important;
+  background: #fff7ed !important;
+}
+
+.report-print-canvas .report-row.row-marginal {
+  border-left-color: #d97706 !important;
+  background: #fffbeb !important;
+}
+
+.report-print-canvas .report-row-title {
+  font-weight: 700 !important;
+  font-size: 0.875rem !important;
+  display: flex !important;
+  justify-content: space-between !important;
+  color: #0f172a !important;
+}
+
+.report-print-canvas .report-row-desc {
+  font-size: 0.8125rem !important;
+  margin-top: 0.35rem !important;
+  color: #334155 !important;
+  white-space: pre-wrap !important;
+  line-height: 1.5 !important;
+}
+
+.report-print-canvas .report-photos-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, 1fr) !important;
+  gap: 0.75rem !important;
+  margin-top: 0.5rem !important;
+}
+
+.report-print-canvas .report-photo-box {
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 4px !important;
+  overflow: hidden !important;
+  background: #ffffff !important;
+  break-inside: avoid !important;
+  page-break-inside: avoid !important;
+}
+
+.report-print-canvas .report-photo-box img {
+  width: 100% !important;
+  height: 160px !important;
+  object-fit: cover !important;
+  display: block !important;
+}
+
+.report-print-canvas .report-photo-caption {
+  font-size: 0.75rem !important;
+  padding: 0.35rem 0.5rem !important;
+  color: #475569 !important;
+  background: #ffffff !important;
+}
+

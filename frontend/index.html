@@ -14,10 +14,15 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <!-- JSZip for browser zip handling -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <!-- html2pdf for direct PDF download -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <!-- jsPDF for direct vector PDF generation (offline-ready local vendor + CDN fallback) -->
+  <script src="jspdf.umd.min.js"></script>
+  <script>
+    if (!window.jspdf && !window.jsPDF) {
+      document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"><\/script>');
+    }
+  </script>
 
-  <link rel="stylesheet" href="styles.css?v=104">
+  <link rel="stylesheet" href="styles.css?v=202">
 </head>
 <body>
   <div class="app-shell">
@@ -101,6 +106,13 @@
               <i data-lucide="chevron-down" class="chevron-icon" style="width: 14px; height: 14px;"></i>
             </button>
             <div class="export-dropdown-menu" id="exportDropdownMenu">
+              <button type="button" class="dropdown-item" id="btnSavePdf" title="Download exact visual PDF report">
+                <i data-lucide="file-text" style="color: #dc2626;"></i>
+                <div class="dropdown-item-info">
+                  <div class="dropdown-item-title">Download PDF</div>
+                  <div class="dropdown-item-sub">Exact Visual Report PDF</div>
+                </div>
+              </button>
               <button type="button" class="dropdown-item" id="btnSaveHzf" title="Download as .hzf archive">
                 <i data-lucide="package" style="color: #2563eb;"></i>
                 <div class="dropdown-item-info">
@@ -424,9 +436,13 @@
         <div class="tab-panel" id="tabReport" style="display: none;">
           <div class="report-wrapper">
             <div class="report-top-actions no-print">
-              <button class="btn btn-primary" onclick="window.print()">
+              <button class="btn btn-primary" id="btnDownloadPdfTab" title="Download exact PDF document directly">
+                <i data-lucide="download"></i>
+                <span>Download PDF Report</span>
+              </button>
+              <button class="btn btn-outline" onclick="window.print()" title="Print using browser dialog">
                 <i data-lucide="printer"></i>
-                <span>Print Report / Save as PDF</span>
+                <span>Print / System Dialog</span>
               </button>
             </div>
 
@@ -696,7 +712,7 @@
 
   </div>
 
-  <script src="config.js?v=104"></script>
-  <script src="app.js?v=104"></script>
+  <script src="config.js?v=202"></script>
+  <script src="app.js?v=202"></script>
 </body>
 </html>
