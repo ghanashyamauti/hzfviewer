@@ -354,11 +354,40 @@ async def api_qa_audit(payload: InspectionPayload):
     res = audit_inspection(payload.dict())
     return res
 
-# Mount frontend directory
+# Health / Status and Frontend Mounting
 frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
-if os.path.exists(frontend_dir):
+has_frontend = os.path.exists(frontend_dir) and os.path.exists(os.path.join(frontend_dir, "index.html"))
+
+@app.api_route("/favicon.ico", methods=["GET", "HEAD"])
+async def favicon():
+    return Response(status_code=204)
+
+if has_frontend:
+    @app.api_route("/api-status", methods=["GET", "HEAD"])
+    async def api_status():
+        return {
+            "status": "online",
+            "app": "HZF & BIN Inspector Studio API",
+            "database": "Neon PostgreSQL (Connected)",
+            "version": "2.3.0",
+            "docs": "/docs",
+            "health": "/api/health"
+        }
     app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+else:
+    # On cloud deployments (Render API-only mode), return 200 OK for root and HEAD health checks
+    @app.api_route("/", methods=["GET", "HEAD"])
+    async def root_status():
+        return {
+            "status": "online",
+            "app": "HZF & BIN Inspector Studio API",
+            "database": "Neon PostgreSQL (Connected)",
+            "version": "2.3.0",
+            "docs": "/docs",
+            "health": "/api/health"
+        }
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=HOST, port=PORT, reload=False)
+

@@ -7,8 +7,12 @@
 const isLocal = typeof window !== 'undefined' && 
   (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
+const isRender = typeof window !== 'undefined' && 
+  window.location.hostname.endsWith('.onrender.com');
+
 window.ENV = window.ENV || {
-  API_BASE_URL: isLocal 
-    ? ((window.location.port === "8000" || window.location.port === "8001") ? "" : "http://127.0.0.1:8000")
-    : "https://hzfviewer.onrender.com"
+  API_BASE_URL: (isLocal && (window.location.port === "8000" || window.location.port === "8001")) || isRender
+    ? "" 
+    : (isLocal ? "http://127.0.0.1:8000" : "https://hzfviewer.onrender.com")
 };
+

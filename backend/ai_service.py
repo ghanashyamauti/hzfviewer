@@ -33,10 +33,13 @@ def get_gemini_url(model: Optional[str] = None) -> str:
     return f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={key}"
 
 async def call_gemini_with_retry(payload: Dict[str, Any], max_retries: int = 3, timeout: float = 30.0) -> httpx.Response:
-    """Helper to post to Gemini with automated model fallback and retry for 503 or 429 quota limits."""
     primary = get_model()
-    fallback = "gemini-3-flash-preview" if primary != "gemini-3-flash-preview" else "gemini-flash-lite-latest"
-    models_to_try = [primary, fallback]
+    # Ordered fallback chain to ensure high availability and prevent 429 quota halts
+    candidates = [primary, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-flash-lite-latest", "gemini-3-flash-preview"]
+    models_to_try = []
+    for c in candidates:
+        if c and c not in models_to_try:
+            models_to_try.append(c)
 
     last_resp = None
     for model_name in models_to_try:
