@@ -53,10 +53,17 @@
     }
   } catch (e) {}
 
-  // 4. Default to empty string (same-origin relative paths) if undefined
-  if (window.ENV.API_BASE_URL === undefined || window.ENV.API_BASE_URL === null) {
-    window.ENV.API_BASE_URL = "";
+  // 4. Default to localhost:8000 if running locally on frontend dev server (port 5173/3000)
+  if (!window.ENV.API_BASE_URL) {
+    const isLocal = typeof window !== 'undefined' && 
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+    if (isLocal && window.location.port !== '8000') {
+      window.ENV.API_BASE_URL = "http://127.0.0.1:8000";
+    } else {
+      window.ENV.API_BASE_URL = "";
+    }
   }
 })();
+
 
 

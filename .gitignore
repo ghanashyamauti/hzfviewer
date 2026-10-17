@@ -38,6 +38,13 @@ backend/saved_reports/*.json
 *.swp
 *.swo
 
+# Node
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+
 # OS
 Thumbs.db
 .DS_Store
+

@@ -712,7 +712,18 @@
 
   </div>
 
-  <script src="config.js?v=202"></script>
-  <script src="app.js?v=202"></script>
+  <script type="module">
+    try {
+      if (typeof import.meta !== 'undefined' && import.meta.env) {
+        window.ENV = window.ENV || {};
+        if (import.meta.env.VITE_API_BASE_URL) window.ENV.API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+        if (import.meta.env.VITE_APP_NAME) window.ENV.APP_NAME = import.meta.env.VITE_APP_NAME;
+        if (import.meta.env.VITE_VERSION) window.ENV.VERSION = import.meta.env.VITE_VERSION;
+      }
+    } catch(e) {}
+  </script>
+  <script src="config.js?v=203"></script>
+  <script src="app.js?v=203"></script>
 </body>
 </html>
+

@@ -1,6 +1,6 @@
 @echo off
 echo ========================================================
-echo Starting HZF Inspector Studio (FastAPI + Web App)
+echo Starting HZF Inspector Studio Backend API (FastAPI)
 echo ========================================================
 cd /d "%~dp0\backend"
 
@@ -23,7 +23,10 @@ if not exist ".env" (
 
 echo.
 echo ========================================================
-echo Open in browser: http://127.0.0.1:8000
+echo Backend API live: http://127.0.0.1:8000 (API Docs: /docs)
+echo To run Frontend: open a separate terminal and run:
+echo    cd frontend
+echo    npm run dev
 echo ========================================================
 echo.
 python main.py

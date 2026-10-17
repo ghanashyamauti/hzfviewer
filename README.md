@@ -50,15 +50,26 @@ Directly create, edit, save, and export inspections to `.hzf`, `.bin`, and PDF f
 
 ## Local Development
 
-### Run Backend
+Run the backend and frontend in two separate terminals for clean decoupling:
+
+### Terminal 1: Run Backend API (FastAPI)
 ```bash
 cd backend
 python -m venv venv
 venv\Scripts\activate      # On Windows
 source venv/bin/activate   # On Mac/Linux
 pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+python main.py
 ```
+- **API Status**: `http://127.0.0.1:8000`
+- **Interactive Swagger Docs**: `http://127.0.0.1:8000/docs`
 
-### Run Frontend
-Open `frontend/index.html` in your browser or run a simple local static server.
+### Terminal 2: Run Frontend (Vite)
+```bash
+cd frontend
+npm install
+npm run dev
+```
+- **Frontend Studio App**: `http://localhost:5173`
+- Communicates with the backend using `API_BASE_URL` defined in `frontend/.env`.
+

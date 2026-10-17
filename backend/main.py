@@ -10,8 +10,8 @@ import uuid
 import datetime
 from fastapi import FastAPI, UploadFile, File, Response, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
 from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
 
@@ -74,17 +74,8 @@ else:
     )
 
 
-@app.middleware("http")
-async def add_no_cache_for_static(request, call_next):
-    response = await call_next(request)
-    path = request.url.path
-    if path.endswith((".js", ".css", ".html")) or path == "/":
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
-    return response
-
 class InspectionPayload(BaseModel):
+
     id: Optional[str] = None
     fileName: str = "Inspection_Report.hzf"
     clientInfo: Dict[str, Any] = {}
@@ -385,45 +376,31 @@ async def api_qa_audit(payload: InspectionPayload):
     res = audit_inspection(payload.dict())
     return res
 
-# Health / Status and Frontend Mounting
-frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
-has_frontend = os.path.exists(frontend_dir) and os.path.exists(os.path.join(frontend_dir, "index.html"))
+# ==============================================================================
+# ROOT HEALTH & API STATUS (Pure REST Backend)
+# ==============================================================================
+
+@app.api_route("/", methods=["GET", "HEAD"])
+async def root_status():
+    """Return pure backend API status and documentation links."""
+    return {
+        "status": "online",
+        "service": APP_NAME,
+        "version": APP_VERSION,
+        "environment": APP_ENV,
+        "database": "Neon PostgreSQL (Connected)" if os.getenv("DATABASE_URL") else "Local Storage",
+        "docs": "/docs",
+        "health": "/api/health",
+        "config": "/api/config"
+    }
 
 @app.api_route("/favicon.ico", methods=["GET", "HEAD"])
 async def favicon():
     return Response(status_code=204)
 
-if has_frontend:
-    @app.api_route("/api-status", methods=["GET", "HEAD"])
-    async def api_status():
-        return {
-            "status": "online",
-            "app": APP_NAME,
-            "version": APP_VERSION,
-            "environment": APP_ENV,
-            "database": "Neon PostgreSQL (Connected)" if os.getenv("DATABASE_URL") else "Local Storage",
-            "docs": "/docs",
-            "health": "/api/health",
-            "config": "/api/config"
-        }
-    app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
-else:
-    # On cloud deployments (Render API-only mode), return 200 OK for root and HEAD health checks
-    @app.api_route("/", methods=["GET", "HEAD"])
-    async def root_status():
-        return {
-            "status": "online",
-            "app": APP_NAME,
-            "version": APP_VERSION,
-            "environment": APP_ENV,
-            "database": "Neon PostgreSQL (Connected)" if os.getenv("DATABASE_URL") else "Local Storage",
-            "docs": "/docs",
-            "health": "/api/health",
-            "config": "/api/config"
-        }
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host=HOST, port=PORT, reload=False)
+
 
 
