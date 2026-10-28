@@ -17,8 +17,31 @@
     clientInfo: {},
     sections: [],
     activeSectionId: null,
-    activePhotoTarget: null // { secId, itemId, photoIdx }
+    activePhotoTarget: null, // { secId, itemId, photoIdx }
+    cachedPdfBlobUrl: null,
+    pdfDirty: true,
+    pdfIsGenerating: false,
+    pdfDoc: null,
+    pdfCurrentPage: 1,
+    pdfTotalPages: 1,
+    pdfFitMode: 'page',
+    pdfZoom: 1.0,
+    pdfCurrentScale: null,
+    currentRenderTask: null
   };
+
+  let selectedPdfCoverPhoto = null; // Base64 dataUrl or null (for default)
+
+  // Safe HTML/XML entity escaper
+  function escapeXml(unsafe) {
+    if (unsafe == null) return '';
+    return String(unsafe)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
 
   // Dynamic API Base URL resolver for local dev & Vercel / Render deployment
   function apiUrl(endpoint) {
@@ -107,6 +130,8 @@
           if (badge) badge.textContent = json.reports.length;
           const dBadge = document.getElementById('drawerSavedReportsCountBadge');
           if (dBadge) dBadge.textContent = json.reports.length;
+          const wBadge = document.getElementById('welcomeSavedCount');
+          if (wBadge) wBadge.textContent = json.reports.length;
         }
       }
     } catch (e) {
@@ -131,25 +156,43 @@
             item.className = 'saved-report-item';
             item.innerHTML = `
               <div class="saved-report-info">
-                <h4>${rep.address || 'Untitled Property'}</h4>
-                <p>Client: <strong>${rep.clientName || 'N/A'}</strong> • Saved: <strong>${rep.savedAt || rep.inspectionDate || 'Recently'}</strong></p>
+                <div class="saved-report-header-line">
+                  <i data-lucide="home" class="saved-report-icon"></i>
+                  <h4>${escapeXml(rep.address || 'Untitled Property')}</h4>
+                </div>
+                <p>Client: <strong>${escapeXml(rep.clientName || 'N/A')}</strong> • Saved: <strong>${escapeXml(rep.savedAt || rep.inspectionDate || 'Recently')}</strong></p>
                 <div class="saved-report-badges">
-                  ${rep.hazards > 0 ? `<span class="mini-badge" style="background:var(--hazard-bg);color:var(--hazard-color);">${rep.hazards} Hazards</span>` : ''}
-                  ${rep.defects > 0 ? `<span class="mini-badge" style="background:var(--defect-bg);color:var(--defect-color);">${rep.defects} Defects</span>` : ''}
-                  <span class="mini-badge" style="background:var(--bg-subtle);color:var(--text-muted);">${rep.totalItems} Items</span>
-                  <span class="mini-badge" style="background:var(--bg-subtle);color:var(--text-muted);">${rep.photoCount} Photos</span>
+                  ${rep.hazards > 0 ? `<span class="mini-badge badge-hazard"><i data-lucide="alert-octagon"></i>${rep.hazards} Hazards</span>` : ''}
+                  ${rep.defects > 0 ? `<span class="mini-badge badge-defect"><i data-lucide="alert-triangle"></i>${rep.defects} Defects</span>` : ''}
+                  <span class="mini-badge badge-neutral"><i data-lucide="check-circle-2"></i>${rep.totalItems} Items</span>
+                  <span class="mini-badge badge-neutral"><i data-lucide="camera"></i>${rep.photoCount} Photos</span>
                 </div>
               </div>
               <div class="saved-report-actions">
-                <button class="btn btn-primary btn-sm" onclick="window.App.openSaved('${rep.id}')">Open</button>
-                <button class="btn btn-outline btn-sm" onclick="window.App.downloadSaved('${rep.id}', 'pdf')" title="Download exact PDF report">PDF</button>
-                <button class="btn btn-outline btn-sm" onclick="window.App.downloadSaved('${rep.id}', 'hzf')" title="Download .hzf archive">.hzf</button>
-                <button class="btn btn-outline btn-sm" onclick="window.App.downloadSaved('${rep.id}', 'bin')" title="Download .bin container">.bin</button>
-                <button class="btn btn-danger btn-sm" onclick="window.App.deleteSaved('${rep.id}')" title="Delete Report">&times;</button>
+                <button class="btn btn-primary btn-sm btn-action-open" onclick="window.App.openSaved('${rep.id}')" title="Open and edit report in studio">
+                  <i data-lucide="folder-open"></i>
+                  <span>Open</span>
+                </button>
+                <button class="btn btn-outline btn-sm btn-action-pdf" onclick="window.App.downloadSaved('${rep.id}', 'pdf')" title="Download exact visual PDF report">
+                  <i data-lucide="file-text" style="color: #dc2626;"></i>
+                  <span>PDF</span>
+                </button>
+                <button class="btn btn-outline btn-sm" onclick="window.App.downloadSaved('${rep.id}', 'hzf')" title="Download .hzf archive">
+                  <i data-lucide="package" style="color: #2563eb;"></i>
+                  <span>.hzf</span>
+                </button>
+                <button class="btn btn-outline btn-sm" onclick="window.App.downloadSaved('${rep.id}', 'bin')" title="Download .bin container">
+                  <i data-lucide="file-archive" style="color: #059669;"></i>
+                  <span>.bin</span>
+                </button>
+                <button class="btn btn-icon btn-danger-ghost btn-sm" onclick="window.App.deleteSaved('${rep.id}')" title="Delete Report">
+                  <i data-lucide="trash-2"></i>
+                </button>
               </div>
             `;
             listEl.appendChild(item);
           });
+          if (window.lucide) lucide.createIcons();
           return;
         }
       }
@@ -1157,85 +1200,698 @@
     document.getElementById('activeFilePill').textContent = State.fileName || "Inspection";
   }
 
-  // Pure function to generate clean, consistent inspection report HTML
-  function generateReportHtml(clientInfo, sections) {
-    const c = clientInfo || {};
-    let secHtml = '';
+  // ==========================================================================
+  // EXACT PDF REPLICA ENGINE FOR REPORT PREVIEW (TAB 3)
+  // Matches Mantra Mirari Flat No.E-404.pdf (Home Inspector Pro layout)
+  // ==========================================================================
 
-    (sections || []).forEach(sec => {
-      secHtml += `<div class="report-sec-head">${sec.name}</div>`;
+  // 5-Column Rating Matrix builder for HIP Replica
+  function buildStatusMatrixHtml(statusStr) {
+    const st = (statusStr || '').trim().toLowerCase();
+    let checkedIdx = 4; // Default 'None'
+    if (st.includes('satisfactory') || st.includes('pass') || st.includes('acceptable') || st.includes('good')) {
+      checkedIdx = 0;
+    } else if (st.includes('marginal') || st.includes('fair') || st.includes('maintenance')) {
+      checkedIdx = 1;
+    } else if (st.includes('defective') || st.includes('defect') || st.includes('safety hazard') || st.includes('hazard') || st.includes('poor') || st.includes('damaged') || st.includes('leak')) {
+      checkedIdx = 2;
+    } else if (st.includes('n/a') || st.includes('not present') || st.includes('not inspected') || st.includes('ni') || st.includes('np')) {
+      checkedIdx = 3;
+    }
 
-      (sec.items || []).forEach(it => {
-        let rowClass = '';
-        if (it.status === 'Safety Hazard') rowClass = 'row-hazard';
-        else if (it.status === 'Defective') rowClass = 'row-defect';
-        else if (it.status === 'Marginal') rowClass = 'row-marginal';
-
-        let photosGrid = '';
-        if (it.photos && it.photos.length > 0) {
-          photosGrid += `<div class="report-photos-grid">`;
-          it.photos.forEach(p => {
-            if (p.dataUrl) {
-              photosGrid += `
-                <div class="report-photo-box">
-                  <img src="${p.dataUrl}" alt="${p.filename || 'Inspection Photo'}">
-                  <div class="report-photo-caption">${p.caption || it.name}</div>
-                </div>
-              `;
-            }
-          });
-          photosGrid += `</div>`;
-        }
-
-        secHtml += `
-          <div class="report-row ${rowClass}">
-            <div class="report-row-title">
-              <span>${it.name}</span>
-              <span style="font-size: 0.75rem; text-transform: uppercase;">${it.status}</span>
-            </div>
-            ${it.comments ? `<div class="report-row-desc">${it.comments}</div>` : ''}
-            ${photosGrid}
-          </div>
-        `;
-      });
-    });
+    const cols = [
+      { label: 'Accept<br/>able', idx: 0 },
+      { label: 'Margin<br/>al', idx: 1 },
+      { label: 'Defecti<br/>ve', idx: 2 },
+      { label: 'N/A', idx: 3 },
+      { label: 'None', idx: 4 }
+    ];
 
     return `
-      <div class="report-sheet-head">
-        <div>
-          <h1 class="report-sheet-title">HOME INSPECTION REPORT</h1>
-          <p class="report-sheet-sub">${c.inspectionCompany || 'Inspection Services'} • ${c.inspectorLicense || ''}</p>
-        </div>
-        <div style="text-align: right; font-size: 0.8125rem;">
-          <div><strong>Date:</strong> ${c.inspectionDate || ''}</div>
-          <div><strong>Inspector:</strong> ${c.inspectorName || ''}</div>
+      <div class="hip-matrix-wrap">
+        <div class="hip-matrix">
+          ${cols.map(c => `
+            <div class="hip-matrix-cell">
+              <div class="hip-matrix-hdr">${c.label}</div>
+              <div class="hip-matrix-box">${c.idx === checkedIdx ? '<span class="hip-matrix-x">X</span>' : ''}</div>
+            </div>
+          `).join('')}
         </div>
       </div>
-
-      <table class="report-table">
-        <tr>
-          <td class="strong">Client:</td>
-          <td>${c.clientName || 'N/A'}</td>
-          <td class="strong">Address:</td>
-          <td>${c.inspectionAddress || 'N/A'}</td>
-        </tr>
-        <tr>
-          <td class="strong">Property Type:</td>
-          <td>${c.propertyType || 'Residential'}</td>
-          <td class="strong">Year / SqFt:</td>
-          <td>${c.yearBuilt || 'N/A'} • ${c.squareFootage || 'N/A'}</td>
-        </tr>
-      </table>
-
-      ${secHtml}
     `;
   }
 
-  // Render Printable Report inside workspace tab
-  function renderReport() {
-    const sheet = document.getElementById('reportSheet');
-    if (!sheet) return;
-    sheet.innerHTML = generateReportHtml(State.clientInfo, State.sections);
+  // Pure function to generate clean, pixel-accurate inspection report HTML matching PDF
+  function generateReportHtml(clientInfo, sections) {
+    const c = clientInfo || {};
+    const companyName = c.inspectionCompany || "N G Home Inspection Services";
+    const inspectorName = c.inspectorName || "Nitin Gujarathi";
+    const phone = c.clientPhone || "00919890002635";
+    const email = c.clientEmail || "niting@macj.in";
+    const officeAddress = "4_4 Yugaymangal complex, Kothrud, Pune, Maharashtra 411038";
+    const propAddress = c.inspectionAddress || "Flat No.E-404, Mantra Mirari, Mundhwa, Pune, Maharashtra, 411036";
+    const clientName = c.clientName || "Valued Client";
+    const agentName = c.realEstateAgent || "SC,SS,STE(AK)  -";
+    const inspDate = c.inspectionDate || "9/24/2026";
+    const inspTime = c.inspectionTime || "11.30 PM";
+    const weather = c.weather || "Cloudy";
+    const propType = c.propertyType || "4.5BHK on 4th Floor";
+
+    // Running header address: 2 parts
+    const addrParts = propAddress.split(',');
+    const addressShort = addrParts.length > 2 ? `${addrParts[0].trim()}, ${addrParts[1].trim()}, ${addrParts[2].trim()}` : propAddress;
+
+    const pages = [];
+    const navItems = [];
+
+    // --------------------------------------------------------------------------
+    // PAGE 1: COVER PAGE
+    // --------------------------------------------------------------------------
+    let coverImgUrl = selectedPdfCoverPhoto;
+    if (!coverImgUrl) {
+      for (const s of (sections || [])) {
+        for (const it of (s.items || [])) {
+          if (it.photos && it.photos.length > 0 && it.photos[0].dataUrl) {
+            coverImgUrl = it.photos[0].dataUrl;
+            break;
+          }
+        }
+        if (coverImgUrl) break;
+      }
+    }
+    if (!coverImgUrl) {
+      coverImgUrl = "/assets/default_cover.jpeg";
+    }
+
+    const coverHtml = `
+      <div class="hip-cover-banner">
+        <div class="hip-cover-company">${escapeXml(companyName)}</div>
+        <div class="hip-cover-title">Property Inspection Report</div>
+      </div>
+      <div class="hip-cover-hero">
+        <img src="${coverImgUrl}" class="hip-cover-img" alt="Building Cover Photo" />
+      </div>
+      <div class="hip-cover-meta">
+        <div class="hip-cover-address"><strong>${escapeXml(propAddress)}</strong></div>
+        <div>Inspection prepared for: <strong>${escapeXml(clientName)}</strong></div>
+        <div>Real Estate Agent: ${escapeXml(agentName)}</div>
+        <div>Date of Inspection: ${escapeXml(inspDate)} &nbsp; Time: ${escapeXml(inspTime)}</div>
+        <div>Weather: ${escapeXml(weather)}</div>
+        <div class="hip-cover-type"><strong>${escapeXml(propType)}</strong></div>
+        <div class="hip-cover-divider"></div>
+        <div>Inspector: <strong>${escapeXml(inspectorName)}</strong></div>
+        <div>${escapeXml(officeAddress)}</div>
+        <div>Phone: ${escapeXml(phone)}</div>
+        <div>Email: ${escapeXml(email)}</div>
+      </div>
+    `;
+    pages.push({ pageId: 'page_cover', isCover: true, title: 'Cover Page', html: coverHtml });
+    navItems.push({ pageId: 'page_cover', title: 'Cover Page' });
+
+    // --------------------------------------------------------------------------
+    // PAGE 2: INSPECTION DETAILS
+    // --------------------------------------------------------------------------
+    const inspDetailsSec = (sections || []).find(s => (s.name || '').trim().toLowerCase() === "inspection details");
+    let extraDetailsHtml = '';
+    if (inspDetailsSec) {
+      const extraItems = (inspDetailsSec.items || []).filter(it => !(it.name || '').toLowerCase().includes('wall reference'));
+      extraItems.forEach((item, idx) => {
+        extraDetailsHtml += `
+          <div class="hip-item-banner">${5 + idx}. ${escapeXml(item.name || 'Detail')}</div>
+          ${item.comments ? `<div style="font-size: 12px; margin-bottom: 6px;">${escapeXml(item.comments)}</div>` : ''}
+        `;
+      });
+    }
+
+    const detailsHtml = `
+      <div class="hip-sec-title">Inspection Details</div>
+      <div class="hip-intro-block">
+        <div class="hip-intro-heading">INTRODUCTION:</div>
+        <p>We appreciate the opportunity to conduct this inspection for you! Please carefully read your entire Inspection Report. Call us after you have reviewed your report, so we can go over any questions you may have. Remember, when the inspection is completed and the report is delivered, we are still available to you for any questions you may have, throughout the entire closing process.</p>
+        <p>Properties being inspected do not "Pass" or "Fail." - The following report is based on an inspection of the visible portion of the structure; inspection may be limited by vegetation and possessions. Depending upon the age of the property, some items like GFCI outlets may not be installed; this report will focus on safety and function, not current code. This report identifies specific non-code, non-cosmetic concerns that the inspector feels may need further investigation or repair.</p>
+        <p>For your safety and liability purposes, we recommend that licensed contractors evaluate and repair any critical concerns and defects. Note that this report is a snapshot in time. We recommend that you or your representative carry out a final walk-through inspection immediately before closing to check the condition of the property, using this report as a guide.</p>
+      </div>
+
+      <div class="hip-item-banner">1. Attendance</div>
+      <div style="font-size: 12px; margin-bottom: 6px;">In Attendance: Site team present.</div>
+
+      <div class="hip-item-banner">2. Home Type</div>
+      <div style="font-size: 12px; margin-bottom: 6px;">Home Type: ${escapeXml(propType)}.</div>
+
+      <div class="hip-item-banner">3. Occupancy</div>
+      <div style="font-size: 12px; margin-bottom: 6px;">Occupancy: Vacant</div>
+
+      <div class="hip-item-banner">4. Wall Reference</div>
+      <div style="text-align: center; margin-top: 4px;">
+        <div style="display: inline-block; margin-bottom: 4px;">${buildStatusMatrixHtml("n/a")}</div>
+        <img src="/assets/wall_reference.jpeg" class="hip-wall-ref-img" alt="Wall Reference Compass Diagram" onerror="this.style.display='none'" />
+        <div style="font-size: 11px; margin-top: 4px; color: #222;">For every area, Door/Entrance is the reference point to relate to the walls</div>
+      </div>
+      ${extraDetailsHtml}
+    `;
+    pages.push({ pageId: 'page_details', isCover: false, title: 'Inspection Details', html: detailsHtml });
+    navItems.push({ pageId: 'page_details', title: 'Inspection Details' });
+
+    // --------------------------------------------------------------------------
+    // PAGES 3+: SYSTEMS & ROOMS SECTIONS
+    // --------------------------------------------------------------------------
+    const summaryFindings = [];
+    const hasCustomGeneralRecom = (sections || []).some(s => (s.name || '').toLowerCase().includes('recommend'));
+
+    (sections || []).forEach((sec, sIdx) => {
+      const secName = sec.name || `Section ${sIdx + 1}`;
+      if (secName.trim().toLowerCase() === "inspection details") return;
+
+      const items = sec.items || [];
+      if (!items || items.length === 0) return;
+
+      const secPageId = `page_sec_${sIdx}`;
+      navItems.push({ pageId: secPageId, title: secName });
+
+      // Group items into reasonable chunks so pages match realistic paper sheets
+      const itemsPerPage = 4;
+      const itemChunks = [];
+      for (let i = 0; i < items.length; i += itemsPerPage) {
+        itemChunks.push(items.slice(i, i + itemsPerPage));
+      }
+
+      itemChunks.forEach((chunk, chunkIdx) => {
+        let itemsHtml = '';
+        if (chunkIdx === 0) {
+          itemsHtml += `<div class="hip-sec-title">${escapeXml(secName)}</div>`;
+        }
+
+        chunk.forEach((it, itIdxWithinChunk) => {
+          const globalItIdx = (chunkIdx * itemsPerPage) + itIdxWithinChunk;
+          const itName = it.name || `Item ${globalItIdx + 1}`;
+          const itStatus = it.status || 'Satisfactory';
+          const commentsRaw = it.comments || '';
+          const photos = it.photos || [];
+
+          // Parse materials & observations
+          const rawLines = commentsRaw.split('\n').map(l => l.trim()).filter(Boolean);
+          const matLines = [];
+          const obsLines = [];
+          rawLines.forEach(l => {
+            const clean = l.replace(/^[•\-\*\s]+/, '').trim();
+            if (clean.toLowerCase().startsWith('materials:')) {
+              matLines.push(clean.replace(/^materials:\s*/i, ''));
+            } else if (clean.toLowerCase().startsWith('observations:')) {
+              // skip label
+            } else if (clean) {
+              obsLines.push(clean);
+            }
+          });
+
+          // Check defect rollup for Report Summary
+          const stLower = itStatus.toLowerCase();
+          const isDefective = ["defect", "hazard", "poor", "damaged", "leak"].some(k => stLower.includes(k));
+          const isMarginal = ["marginal", "fair", "maintenance"].some(k => stLower.includes(k));
+          if ((isDefective || isMarginal || obsLines.length > 0) && itName.toLowerCase() !== "location" && secName !== "Inspection Details") {
+            summaryFindings.push({
+              section: secName,
+              itemIndex: globalItIdx + 1,
+              itemName: itName,
+              findings: obsLines.length > 0 ? obsLines : [`Condition marked as ${itStatus}.`]
+            });
+          }
+
+          let rightContent = '';
+          if (itName.toLowerCase() === "location" && photos.length > 0) {
+            const inlineP = photos[0];
+            rightContent = `
+              <div class="hip-inline-photo">
+                <img src="${inlineP.dataUrl}" alt="Location Reference" />
+                <div class="hip-photo-cap">${escapeXml(inlineP.caption || 'Location')}</div>
+              </div>
+            `;
+          } else {
+            if (matLines.length > 0) {
+              rightContent += `<div class="hip-materials"><strong>Materials:</strong> ${escapeXml(matLines.join(', '))}</div>`;
+            }
+            if (obsLines.length > 0) {
+              rightContent += `<div class="hip-obs-heading">Observations:</div>`;
+              obsLines.forEach(obs => {
+                rightContent += `<div class="hip-obs-bullet">• ${escapeXml(obs)}</div>`;
+              });
+            }
+            if (!matLines.length && !obsLines.length) {
+              rightContent += `<div style="font-size: 11.5px; color: #444;">${itStatus}</div>`;
+            }
+          }
+
+          itemsHtml += `
+            <div class="hip-item-banner">${globalItIdx + 1}. ${escapeXml(itName)}</div>
+            <div class="hip-item-row">
+              ${buildStatusMatrixHtml(itStatus)}
+              <div class="hip-item-content">
+                ${rightContent}
+              </div>
+            </div>
+          `;
+        });
+
+        pages.push({
+          pageId: chunkIdx === 0 ? secPageId : `${secPageId}_p${chunkIdx + 1}`,
+          isCover: false,
+          title: secName,
+          html: itemsHtml
+        });
+      });
+
+      // Gallery photos for this section (2 columns x 3 rows = 6 photos per page)
+      const allSecPhotos = [];
+      items.forEach(it => {
+        const isLoc = (it.name || '').toLowerCase() === "location";
+        const itPhotos = isLoc ? (it.photos || []).slice(1) : (it.photos || []);
+        itPhotos.forEach(p => {
+          if (p.dataUrl) {
+            allSecPhotos.push({
+              dataUrl: p.dataUrl,
+              caption: p.caption || it.name
+            });
+          }
+        });
+      });
+
+      if (allSecPhotos.length > 0) {
+        const photoChunks = [];
+        for (let pIdx = 0; pIdx < allSecPhotos.length; pIdx += 6) {
+          photoChunks.push(allSecPhotos.slice(pIdx, pIdx + 6));
+        }
+
+        photoChunks.forEach((pChunk, pcIdx) => {
+          let photoPageHtml = '';
+          if (pcIdx === 0) {
+            photoPageHtml += `<div class="hip-sec-title">${escapeXml(secName)} - Photos</div>`;
+          }
+          photoPageHtml += `<div class="hip-photo-grid">`;
+          pChunk.forEach(p => {
+            photoPageHtml += `
+              <div class="hip-photo-card">
+                <img src="${p.dataUrl}" class="hip-photo-img" alt="${escapeXml(p.caption)}" />
+                <div class="hip-photo-caption">${escapeXml(p.caption)}</div>
+              </div>
+            `;
+          });
+          photoPageHtml += `</div>`;
+
+          pages.push({
+            pageId: `${secPageId}_photos_${pcIdx + 1}`,
+            isCover: false,
+            title: `${secName} Photos`,
+            html: photoPageHtml
+          });
+        });
+      }
+    });
+
+    // --------------------------------------------------------------------------
+    // GENERAL RECOMMENDATIONS (Fallback if not provided in sections)
+    // --------------------------------------------------------------------------
+    if (!hasCustomGeneralRecom) {
+      const recomHtml = `
+        <div class="hip-sec-title">General Recommendations</div>
+        <div class="hip-item-banner">1. Wall Repair Methodology</div>
+        <div style="font-size: 12px; line-height: 1.5; margin-top: 4px;">
+          <div><strong>Hairline cracks, we recommend :</strong></div>
+          <div style="margin-left: 12px;">Step 1 : Sanding along the crack, then proper putty filling,</div>
+          <div style="margin-left: 12px;">Step 2 : Primer & paint finishing as per manufacture specification.</div>
+          <div style="margin-top: 4px;"><strong>Significant cracks, we recommend :</strong></div>
+          <div style="margin-left: 12px;">Step 1 : Making 2 mm cutting along the crack with diamond bladed hand grinder</div>
+          <div style="margin-left: 12px;">Step 2 : Sanding off any loose materials and dirt</div>
+          <div style="margin-left: 12px;">Step 3 : Plastering with dry mesh and suitable grade cement mortar</div>
+          <div style="margin-left: 12px;">Step 4 : Primer & paint finishing as per manufacture specification.</div>
+          <div style="margin-top: 4px;"><strong>Hollow plaster, we recommend :</strong></div>
+          <div style="margin-left: 12px;">Step 1 : Hollow plaster to be chipped off till hard surface</div>
+          <div style="margin-left: 12px;">Step 2 : Area to be re-plastered with suitable grade cement mortar</div>
+        </div>
+
+        <div class="hip-item-banner" style="margin-top: 14px;">2. Waterproofing & Plumbing Maintenance</div>
+        <div style="font-size: 12px; line-height: 1.5; margin-top: 4px;">
+          <div>• All bottle traps and angle valves with seepage should be dismantled, thread-taped, and refitted.</div>
+          <div>• Pressure testing recommended for all concealed lines before completing civil touch-ups.</div>
+          <div>• Maintain minimum 48-hour cure time for silicone sealant around counter tops and sanitary fittings.</div>
+        </div>
+      `;
+      pages.push({ pageId: 'page_general_recom', isCover: false, title: 'General Recommendations', html: recomHtml });
+      navItems.push({ pageId: 'page_general_recom', title: 'General Recommendations' });
+    }
+
+    // --------------------------------------------------------------------------
+    // REPORT SUMMARY (DEFICIENCY ROLLUP)
+    // --------------------------------------------------------------------------
+    let summaryRowsHtml = '';
+    if (summaryFindings.length === 0) {
+      summaryRowsHtml = `<tr><td colspan="3" style="text-align: center; color: #666; padding: 1rem;">No defective or marginal conditions noted.</td></tr>`;
+    } else {
+      summaryFindings.forEach(f => {
+        const bulletHtml = f.findings.map(b => `<div style="color: #ff0000; margin-bottom: 2px;">• ${escapeXml(b)}</div>`).join('');
+        summaryRowsHtml += `
+          <tr>
+            <td style="font-weight: bold; width: 25%;">${escapeXml(f.section)}</td>
+            <td style="width: 25%;">${escapeXml(f.itemIndex + '. ' + f.itemName)}</td>
+            <td style="width: 50%;">${bulletHtml}</td>
+          </tr>
+        `;
+      });
+    }
+
+    const summaryHtml = `
+      <div class="hip-sec-title">Report Summary</div>
+      <div style="font-size: 11.5px; line-height: 1.45; color: #111; margin-bottom: 12px;">
+        The summary below consists of potentially significant findings. These findings can be a safety hazard, a deficiency requiring major expense to correct, or an item I would like to draw your attention to. The summary is not a substitute for the entire report. Please read the entire report carefully.
+      </div>
+      <table class="hip-summary-table">
+        <thead>
+          <tr>
+            <th style="width: 25%;">Section</th>
+            <th style="width: 25%;">Item</th>
+            <th style="width: 50%;">Deficiency / Finding</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${summaryRowsHtml}
+        </tbody>
+      </table>
+    `;
+    pages.push({ pageId: 'page_report_summary', isCover: false, title: 'Report Summary', html: summaryHtml });
+    navItems.push({ pageId: 'page_report_summary', title: 'Report Summary' });
+
+    // Store navItems globally so the dropdown can navigate
+    window._hipReportNavItems = navItems;
+
+    // Render all assembled pages with exact PDF borders, running headers, and page numbering
+    const totalPages = pages.length;
+    const bodyTotal = totalPages > 1 ? totalPages - 1 : 1;
+
+    let finalHtml = '';
+    pages.forEach((p, pIdx) => {
+      const isCover = p.isCover;
+      const bodyPage = pIdx; // Page 2 is body page 1
+
+      const headerHtml = isCover ? '' : `
+        <div class="hip-running-header">
+          <div class="hip-rh-company">${escapeXml(companyName)}</div>
+          <div class="hip-rh-address">${escapeXml(addressShort)}</div>
+        </div>
+      `;
+
+      const footerHtml = isCover ? '' : `
+        <div class="hip-running-footer">Page ${bodyPage} of ${bodyTotal}</div>
+      `;
+
+      finalHtml += `
+        <div class="hip-page ${isCover ? 'hip-cover-page' : ''}" id="${p.pageId}">
+          <div class="hip-page-border">
+            ${headerHtml}
+            <div class="hip-page-body" style="flex: 1 1 auto;">
+              ${p.html}
+            </div>
+            ${footerHtml}
+          </div>
+        </div>
+      `;
+    });
+
+    return finalHtml;
+  }
+
+  // Render a specific page of the PDF into the canvas preview
+  async function renderPdfPage(pageNum, resetScroll = false) {
+    if (!State.pdfDoc) return;
+    const totalPages = State.pdfTotalPages || 1;
+    pageNum = Math.max(1, Math.min(pageNum, totalPages));
+    const isPageChange = (State.pdfCurrentPage !== pageNum);
+    State.pdfCurrentPage = pageNum;
+
+    const canvasScroll = document.getElementById('pdfCanvasScroll');
+    const pageIndicator = document.getElementById('pdfPageIndicator');
+    const btnPrev = document.getElementById('btnPdfPrevPage');
+    const btnNext = document.getElementById('btnPdfNextPage');
+
+    const zoomLevel = document.getElementById('pdfZoomLevel');
+    const btnFitPage = document.getElementById('btnPdfFitPage');
+    const btnFitWidth = document.getElementById('btnPdfFitWidth');
+
+    if (pageIndicator) pageIndicator.textContent = `Page ${pageNum} / ${totalPages}`;
+    if (btnPrev) btnPrev.disabled = (pageNum <= 1);
+    if (btnNext) btnNext.disabled = (pageNum >= totalPages);
+
+    if (btnFitPage) btnFitPage.classList.toggle('active', State.pdfFitMode === 'page');
+    if (btnFitWidth) btnFitWidth.classList.toggle('active', State.pdfFitMode === 'width');
+
+    if (!canvasScroll) return;
+
+    // Cleanly cancel any in-flight render task before starting a new one
+    if (State.currentRenderTask) {
+      try {
+        State.currentRenderTask.cancel();
+      } catch (e) {}
+      State.currentRenderTask = null;
+    }
+
+    try {
+      const page = await State.pdfDoc.getPage(pageNum);
+
+      // Determine dimensions from container
+      const containerWidth = canvasScroll.clientWidth || 850;
+      const containerHeight = canvasScroll.clientHeight || 550;
+      const baseViewport = page.getViewport({ scale: 1.0 });
+
+      const availW = Math.max(containerWidth - 40, 320);
+      const availH = Math.max(containerHeight - 40, 320);
+      const fitPageScale = Math.min(availW / baseViewport.width, availH / baseViewport.height);
+      const fitWidthScale = availW / baseViewport.width;
+
+      let scale;
+      if (State.pdfFitMode === 'width') {
+        scale = fitWidthScale;
+        State.pdfCurrentScale = scale;
+        if (zoomLevel) zoomLevel.textContent = 'Width';
+      } else if (State.pdfFitMode === 'page') {
+        scale = fitPageScale;
+        State.pdfCurrentScale = scale;
+        if (zoomLevel) zoomLevel.textContent = 'Fit';
+      } else {
+        // Custom Zoom
+        if (!State.pdfCurrentScale) {
+          State.pdfCurrentScale = fitPageScale;
+        }
+        scale = State.pdfCurrentScale;
+        if (zoomLevel) {
+          const pct = Math.round((scale / (fitPageScale || 1)) * 100);
+          zoomLevel.textContent = `${pct}%`;
+        }
+      }
+
+      const viewport = page.getViewport({ scale });
+
+      // Clean existing page
+      canvasScroll.innerHTML = '';
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'pdf-canvas-page';
+      wrapper.style.width = `${Math.round(viewport.width)}px`;
+      wrapper.dataset.page = pageNum;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(viewport.width);
+      canvas.height = Math.round(viewport.height);
+      canvas.style.width = `${Math.round(viewport.width)}px`;
+      canvas.style.height = `${Math.round(viewport.height)}px`;
+      canvas.style.display = 'block';
+
+      const label = document.createElement('div');
+      label.className = 'pdf-canvas-page-label';
+      label.textContent = `Page ${pageNum} of ${totalPages}`;
+
+      wrapper.appendChild(canvas);
+      wrapper.appendChild(label);
+      canvasScroll.appendChild(wrapper);
+
+      if (isPageChange || resetScroll) {
+        canvasScroll.scrollTop = 0;
+        canvasScroll.scrollLeft = 0;
+      }
+
+      const ctx = canvas.getContext('2d');
+      const renderTask = page.render({ canvasContext: ctx, viewport });
+      State.currentRenderTask = renderTask;
+      await renderTask.promise;
+      State.currentRenderTask = null;
+      if (window.lucide) lucide.createIcons();
+    } catch (err) {
+      if (err && (err.name === 'RenderingCancelledException' || err.message?.includes('cancelled'))) {
+        return; // Ignore normal cancellation during rapid zoom or page change
+      }
+      console.error(`Failed to render PDF page ${pageNum}:`, err);
+    }
+  }
+
+  // Load & render native PDF preview inside tabReport using PDF.js canvas
+  async function loadPdfPreview(forceReload = false) {
+    const tabReport = document.getElementById('tabReport');
+    if (!tabReport || tabReport.style.display === 'none') {
+      if (forceReload) State.pdfDirty = true;
+      return;
+    }
+
+    const overlay = document.getElementById('pdfLoadingOverlay');
+    const canvasViewer = document.getElementById('pdfCanvasViewer');
+    const canvasScroll = document.getElementById('pdfCanvasScroll');
+    const emptyState = document.getElementById('pdfEmptyState');
+    const statusTag = document.getElementById('pdfPreviewStatus');
+    const refreshBtn = document.getElementById('btnRefreshPdfPreview');
+    const pageIndicator = document.getElementById('pdfPageIndicator');
+
+    // Check if inspection has any content
+    if (!State.sections || State.sections.length === 0) {
+      if (emptyState) emptyState.style.display = 'flex';
+      if (canvasViewer) canvasViewer.style.display = 'none';
+      if (overlay) overlay.style.display = 'none';
+      if (statusTag) {
+        statusTag.innerHTML = '<i data-lucide="info"></i><span>No Data</span>';
+      }
+      if (window.lucide) lucide.createIcons();
+      return;
+    }
+
+    // If already generated and not dirty and not forced, reuse cached render
+    if (!forceReload && !State.pdfDirty && State.cachedPdfBlobUrl && State.pdfDoc) {
+      if (emptyState) emptyState.style.display = 'none';
+      if (canvasViewer) canvasViewer.style.display = 'flex';
+      if (statusTag) {
+        statusTag.innerHTML = '<i data-lucide="check-circle-2" style="color: var(--success, #10b981);"></i><span>Live & Synchronized</span>';
+      }
+      if (window.lucide) lucide.createIcons();
+      return;
+    }
+
+    // Already generating? Avoid duplicate concurrent requests
+    if (State.pdfIsGenerating) return;
+    State.pdfIsGenerating = true;
+
+    if (emptyState) emptyState.style.display = 'none';
+    if (overlay) overlay.style.display = 'flex';
+    if (refreshBtn) refreshBtn.classList.add('is-refreshing');
+    if (statusTag) {
+      statusTag.innerHTML = '<i data-lucide="loader-2" class="spin"></i><span>Generating PDF...</span>';
+      if (window.lucide) lucide.createIcons();
+    }
+
+    try {
+      const companyName = document.getElementById('pdfCompanyName')?.value.trim() || State.clientInfo?.companyName || "N G Home Inspection Services";
+      const inspectorName = document.getElementById('pdfInspectorName')?.value.trim() || State.clientInfo?.inspectorName || "Nitin Gujarathi";
+      const phone = document.getElementById('pdfInspectorPhone')?.value.trim() || State.clientInfo?.inspectorPhone || "00919890002635";
+      const email = document.getElementById('pdfInspectorEmail')?.value.trim() || State.clientInfo?.inspectorEmail || "niting@macj.in";
+      const officeAddress = document.getElementById('pdfInspectorAddress')?.value.trim() || State.clientInfo?.inspectorAddress || "4_4 Yugaymangal complex, Kothrud, Pune, Maharashtra 411038";
+
+      const cleanBase = (State.fileName || 'Inspection_Report').replace(/\.[^/.]+$/, "");
+      const pdfFilename = `${cleanBase}_Report.pdf`;
+
+      const resp = await fetch(apiUrl('/api/export-pdf'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: State.activeReportId,
+          fileName: pdfFilename,
+          clientInfo: State.clientInfo,
+          sections: State.sections,
+          coverPhoto: selectedPdfCoverPhoto,
+          inspectorInfo: {
+            companyName,
+            inspectorName,
+            phone,
+            email,
+            officeAddress
+          }
+        })
+      });
+
+      if (!resp.ok) {
+        const errJson = await resp.json().catch(() => ({}));
+        throw new Error(errJson.detail || `Server returned HTTP ${resp.status}`);
+      }
+
+      const blob = await resp.blob();
+
+      // Revoke old blob to prevent memory leaks
+      if (State.cachedPdfBlobUrl) {
+        try { URL.revokeObjectURL(State.cachedPdfBlobUrl); } catch (_) {}
+      }
+
+      const blobUrl = URL.createObjectURL(blob);
+      State.cachedPdfBlobUrl = blobUrl;
+      State.pdfDirty = false;
+
+      // Render PDF pages as canvas using PDF.js (works in ALL browsers including Brave)
+      if (window.pdfjsLib && canvasScroll) {
+        const loadingText = document.getElementById('pdfLoadingText');
+        if (loadingText) loadingText.textContent = 'Loading vector document...';
+
+        const arrayBuffer = await blob.arrayBuffer();
+        const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        State.pdfDoc = pdfDoc;
+        State.pdfTotalPages = pdfDoc.numPages;
+
+        if (canvasViewer) canvasViewer.style.display = 'flex';
+        await renderPdfPage(1);
+
+        console.log(`[PDF Preview] Successfully loaded PDF (${pdfDoc.numPages} pages) and rendered page 1`);
+      } else {
+        // Fallback: embed an iframe with blobUrl if PDF.js is unavailable
+        let fallbackIframe = document.getElementById('pdfFallbackIframe');
+        if (!fallbackIframe) {
+          fallbackIframe = document.createElement('iframe');
+          fallbackIframe.id = 'pdfFallbackIframe';
+          fallbackIframe.className = 'pdf-viewer-frame';
+          const stage = document.getElementById('pdfViewerStage');
+          if (stage) stage.appendChild(fallbackIframe);
+        }
+        fallbackIframe.src = `${blobUrl}#toolbar=1&navpanes=1&view=FitH`;
+        fallbackIframe.style.display = 'block';
+        if (canvasViewer) canvasViewer.style.display = 'none';
+        console.log('[PDF Preview] Rendered via fallback iframe');
+      }
+
+      if (statusTag) {
+        statusTag.innerHTML = '<i data-lucide="check-circle-2" style="color: var(--success, #10b981);"></i><span>Exact PDF Live</span>';
+      }
+    } catch (err) {
+      console.error("PDF preview generation failed:", err);
+      if (emptyState) emptyState.style.display = 'flex';
+      if (canvasViewer) canvasViewer.style.display = 'none';
+      if (statusTag) {
+        statusTag.innerHTML = '<i data-lucide="alert-triangle" style="color: var(--danger, #ef4444);"></i><span>Preview Error</span>';
+      }
+      showToast("PDF Preview Error: " + err.message, "error");
+    } finally {
+      State.pdfIsGenerating = false;
+      if (overlay) overlay.style.display = 'none';
+      if (refreshBtn) refreshBtn.classList.remove('is-refreshing');
+      if (window.lucide) lucide.createIcons();
+    }
+  }
+
+  async function openPdfInNewTab() {
+    if (State.cachedPdfBlobUrl && !State.pdfDirty) {
+      window.open(State.cachedPdfBlobUrl, '_blank');
+    } else {
+      await loadPdfPreview(true);
+      if (State.cachedPdfBlobUrl) {
+        window.open(State.cachedPdfBlobUrl, '_blank');
+      }
+    }
+  }
+
+  // Trigger PDF preview or flag dirty
+  function renderReport(force = false) {
+    State.pdfDirty = true;
+    const tabR = document.getElementById('tabReport');
+    if (tabR && tabR.style.display !== 'none') {
+      loadPdfPreview(force);
+    }
   }
 
   function renderAll() {
@@ -1333,7 +1989,39 @@
           const json = await resp.json();
           if (json.success && json.data) {
             if (format === 'pdf') {
-              await downloadPdfReport(json.data);
+              showToast("Generating PDF for " + (json.data.fileName || 'Report') + "...");
+              const cleanBase = (json.data.fileName || 'Inspection_Report').replace(/\.[^/.]+$/, "");
+              const pdfFilename = `${cleanBase}_Report.pdf`;
+              const respPdf = await fetch(apiUrl('/api/export-pdf'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  id: reportId,
+                  fileName: pdfFilename,
+                  clientInfo: json.data.clientInfo || {},
+                  sections: json.data.sections || [],
+                  coverPhoto: null,
+                  inspectorInfo: {
+                    companyName: json.data.clientInfo?.companyName || "N G Home Inspection Services",
+                    inspectorName: json.data.clientInfo?.inspectorName || "Nitin Gujarathi",
+                    phone: json.data.clientInfo?.inspectorPhone || "00919890002635",
+                    email: json.data.clientInfo?.inspectorEmail || "niting@macj.in",
+                    officeAddress: json.data.clientInfo?.inspectorAddress || "4_4 Yugaymangal complex, Kothrud, Pune, Maharashtra 411038"
+                  }
+                })
+              });
+              if (respPdf.ok) {
+                const blob = await respPdf.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = pdfFilename;
+                a.click();
+                URL.revokeObjectURL(url);
+                showToast(`Downloaded ${pdfFilename}!`);
+              } else {
+                showToast("Failed to generate PDF for saved report");
+              }
               return;
             }
             const endpoint = (format === 'bin') ? '/api/export-bin' : '/api/export-hzf';
@@ -1734,319 +2422,189 @@
     }
   }
 
-  // Direct PDF Report Downloader (jsPDF vector rendering — no html2canvas)
-  async function downloadPdfReport(targetData = null) {
-    showToast("Generating PDF report...");
+  // ==============================================================================
+  // VISUAL PDF REPORT EXPORT & COVER PHOTO SELECTOR (Matching Mantra Mirari Standard)
+  // ==============================================================================
+  selectedPdfCoverPhoto = null; // Base64 dataUrl or null (for default)
+  let selectedCoverSourceType = 'default'; // 'default', 'upload', 'report'
 
-    let clientInfo, sections, fileName;
-    if (targetData) {
-      clientInfo = targetData.clientInfo || {};
-      sections = targetData.sections || [];
-      fileName = targetData.fileName || 'Inspection_Report';
-    } else {
-      syncFormToState();
-      clientInfo = State.clientInfo || {};
-      sections = State.sections || [];
-      fileName = State.fileName || 'Inspection_Report';
+  // Open Export PDF Modal and populate cover photo selector & inspector details
+  function openExportPdfModal() {
+    syncFormToState();
+    const modal = document.getElementById('exportPdfModal');
+    if (!modal) return;
+
+    // 1. Populate Inspector & Company Details
+    const c = State.clientInfo || {};
+    const companyInput = document.getElementById('pdfCompanyName');
+    const inspNameInput = document.getElementById('pdfInspectorName');
+    const phoneInput = document.getElementById('pdfInspectorPhone');
+    const emailInput = document.getElementById('pdfInspectorEmail');
+    const addrInput = document.getElementById('pdfInspectorAddress');
+
+    if (companyInput) companyInput.value = c.inspectionCompany || "N G Home Inspection Services";
+    if (inspNameInput) inspNameInput.value = c.inspectorName || "Nitin Gujarathi";
+    if (phoneInput) phoneInput.value = c.clientPhone || "00919890002635";
+    if (emailInput) emailInput.value = c.clientEmail || "niting@macj.in";
+    if (addrInput) addrInput.value = "4_4 Yugaymangal complex, Kothrud, Pune, Maharashtra 411038";
+
+    // 2. Collect all attached photos from all sections
+    const allReportPhotos = [];
+    (State.sections || []).forEach(s => {
+      (s.items || []).forEach(it => {
+        (it.photos || []).forEach(p => {
+          if (p.dataUrl) {
+            allReportPhotos.push({
+              sectionName: s.name,
+              itemName: it.name,
+              caption: p.caption || it.name,
+              dataUrl: p.dataUrl
+            });
+          }
+        });
+      });
+    });
+
+    const countElem = document.getElementById('reportPhotosCount');
+    if (countElem) countElem.textContent = allReportPhotos.length;
+
+    // Render photo gallery drawer thumbnails
+    const grid = document.getElementById('reportPhotosGrid');
+    if (grid) {
+      grid.innerHTML = '';
+      if (allReportPhotos.length === 0) {
+        grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: var(--text-muted); font-size: 0.8rem; padding: 1rem;">No photos attached to items in this inspection yet.</div>';
+      } else {
+        allReportPhotos.forEach((photo) => {
+          const card = document.createElement('div');
+          card.className = 'report-thumb-card' + (selectedPdfCoverPhoto === photo.dataUrl ? ' selected' : '');
+          card.title = `${photo.sectionName} - ${photo.itemName}`;
+          card.innerHTML = `
+            <img src="${photo.dataUrl}" alt="Thumbnail" />
+            <div class="report-thumb-badge">${escapeXml(photo.caption || photo.itemName)}</div>
+          `;
+          card.addEventListener('click', () => {
+            document.querySelectorAll('.report-thumb-card').forEach(c => c.classList.remove('selected'));
+            card.classList.add('selected');
+            setCoverPhoto(photo.dataUrl, 'report', `${photo.sectionName}: ${photo.caption || photo.itemName}`);
+          });
+          grid.appendChild(card);
+        });
+      }
     }
 
-    const cleanBase = (fileName || 'Inspection_Report').replace(/\.[^/.]+$/, "");
+    // Initialize Cover Photo preview
+    if (!selectedPdfCoverPhoto) {
+      if (allReportPhotos.length > 0) {
+        setCoverPhoto(allReportPhotos[0].dataUrl, 'report', `Photo 1: ${allReportPhotos[0].caption || 'Exterior'}`);
+      } else {
+        setCoverPhoto(null, 'default', 'Default Bundled Hero');
+      }
+    } else {
+      updateCoverPreviewUI();
+    }
+
+    const drawer = document.getElementById('reportPhotosDrawer');
+    if (drawer) drawer.style.display = 'none';
+
+    const overlay = document.getElementById('pdfGeneratingOverlay');
+    if (overlay) overlay.style.display = 'none';
+
+    modal.style.display = 'flex';
+    if (window.lucide) lucide.createIcons();
+  }
+
+  function setCoverPhoto(dataUrl, sourceType, sourceLabel) {
+    selectedPdfCoverPhoto = dataUrl;
+    selectedCoverSourceType = sourceType;
+    const labelElem = document.getElementById('coverSourceLabel');
+    if (labelElem) labelElem.textContent = sourceLabel || (sourceType === 'upload' ? 'Custom Uploaded Photo' : (sourceType === 'report' ? 'Selected Report Photo' : 'Default Bundled Hero'));
+    updateCoverPreviewUI();
+  }
+
+  function updateCoverPreviewUI() {
+    const img = document.getElementById('pdfCoverPreviewImg');
+    const placeholder = document.getElementById('pdfCoverPlaceholder');
+    if (selectedPdfCoverPhoto) {
+      if (img) {
+        img.src = selectedPdfCoverPhoto;
+        img.style.display = 'block';
+      }
+      if (placeholder) placeholder.style.display = 'none';
+    } else {
+      if (img) {
+        img.src = '';
+        img.style.display = 'none';
+      }
+      if (placeholder) placeholder.style.display = 'flex';
+    }
+  }
+
+  // Trigger Backend PDF Generator and stream download
+  async function submitGeneratePdf() {
+    syncFormToState();
+    const overlay = document.getElementById('pdfGeneratingOverlay');
+    const statusTxt = document.getElementById('pdfGeneratingStatus');
+    if (overlay) overlay.style.display = 'flex';
+    if (statusTxt) statusTxt.textContent = "Compiling report and formatting high-res photos...";
+
+    const companyName = document.getElementById('pdfCompanyName')?.value.trim() || "N G Home Inspection Services";
+    const inspectorName = document.getElementById('pdfInspectorName')?.value.trim() || "Nitin Gujarathi";
+    const phone = document.getElementById('pdfInspectorPhone')?.value.trim() || "00919890002635";
+    const email = document.getElementById('pdfInspectorEmail')?.value.trim() || "niting@macj.in";
+    const officeAddress = document.getElementById('pdfInspectorAddress')?.value.trim() || "4_4 Yugaymangal complex, Kothrud, Pune, Maharashtra 411038";
+
+    const cleanBase = (State.fileName || 'Inspection_Report').replace(/\.[^/.]+$/, "");
     const pdfFilename = `${cleanBase}_Report.pdf`;
 
-    // [STEP 2b] Log at the start
-    const jsPDFClass = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
-    console.log("DEBUG: jsPDF check:", {
-      typeof_window_jspdf: typeof window.jspdf,
-      typeof_window_jspdf_jsPDF: typeof window.jspdf?.jsPDF,
-      typeof_window_jsPDF: typeof window.jsPDF,
-      jsPDF_version: window.jspdf?.version || jsPDFClass?.version || "unknown"
-    });
-
-    if (!jsPDFClass) {
-      const err = new Error("jsPDF library is not loaded or missing on window");
-      console.error("DEBUG: Missing jsPDF fallback error:", err.stack);
-      showToast("Error: " + err.message);
-      return;
-    }
-
-    // [STEP 2c] Log the input
-    const allItems = (sections || []).flatMap(s => s.items || []);
-    const allPhotosWithDataUrl = allItems.flatMap(i => (i.photos || []).filter(p => !!p.dataUrl));
-    console.log("DEBUG: PDF Input Data:", {
-      numberOfSections: (sections || []).length,
-      totalNumberOfItems: allItems.length,
-      numberOfPhotosWithDataUrl: allPhotosWithDataUrl.length,
-      first3Photos: allPhotosWithDataUrl.slice(0, 3).map((p, idx) => ({
-        index: idx,
-        dataUrlPrefix: (p.dataUrl || '').substring(0, 30),
-        dataUrlLength: (p.dataUrl || '').length
-      }))
-    });
-
     try {
-      const pdf = new jsPDFClass({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      const pageW = pdf.internal.pageSize.getWidth();   // ~210
-      const pageH = pdf.internal.pageSize.getHeight();  // ~297
-      const M = 15; // margin
-      const cW = pageW - M * 2; // content width ~180
-      let y = M;
-
-      // Colors
-      const BLACK = [15, 23, 42];
-      const GRAY = [100, 116, 139];
-      const LIGHT = [226, 232, 240];
-      const ACCENT = [99, 102, 241];
-      const WHITE = [255, 255, 255];
-      const BG_LIGHT = [248, 250, 252];
-
-      const STATUS_COLORS = {
-        'Safety Hazard': { border: [225, 29, 72], bg: [255, 241, 242] },
-        'Safety': { border: [225, 29, 72], bg: [255, 241, 242] },
-        'Defective': { border: [234, 88, 12], bg: [255, 247, 237] },
-        'Defects': { border: [234, 88, 12], bg: [255, 247, 237] },
-        'Marginal': { border: [217, 119, 6], bg: [255, 251, 235] },
-        'Satisfactory': { border: [22, 163, 74], bg: [240, 253, 244] },
-        'Good': { border: [22, 163, 74], bg: [240, 253, 244] },
-        'Not Inspected': { border: [148, 163, 184], bg: [248, 250, 252] },
-        'Not Present': { border: [148, 163, 184], bg: [248, 250, 252] },
-      };
-
-      function checkPage(needed) {
-        if (y + needed > pageH - M) {
-          pdf.addPage();
-          y = M;
-          return true;
-        }
-        return false;
-      }
-
-      // Helper: wrap text and return lines
-      function getLines(text, maxWidth, fontSize) {
-        pdf.setFontSize(fontSize);
-        return pdf.splitTextToSize(text || '', maxWidth);
-      }
-
-      // ========== HEADER ==========
-      pdf.setFillColor(...ACCENT);
-      pdf.rect(0, 0, pageW, 28, 'F');
-      pdf.setTextColor(...WHITE);
-      pdf.setFontSize(18);
-      pdf.setFont('helvetica', 'bold');
-      pdf.text('HOME INSPECTION REPORT', M, 13);
-      pdf.setFontSize(9);
-      pdf.setFont('helvetica', 'normal');
-      const company = clientInfo.inspectionCompany || 'Inspection Services';
-      const license = clientInfo.inspectorLicense || '';
-      pdf.text(`${company}${license ? '  •  ' + license : ''}`, M, 20);
-
-      // Date & Inspector on right
-      pdf.setFontSize(9);
-      const dateStr = `Date: ${clientInfo.inspectionDate || 'N/A'}`;
-      const inspStr = `Inspector: ${clientInfo.inspectorName || 'N/A'}`;
-      pdf.text(dateStr, pageW - M, 13, { align: 'right' });
-      pdf.text(inspStr, pageW - M, 20, { align: 'right' });
-
-      y = 35;
-
-      // ========== CLIENT INFO TABLE ==========
-      const c = clientInfo;
-      const infoRows = [
-        ['Client', c.clientName || 'N/A', 'Address', c.inspectionAddress || 'N/A'],
-        ['Property Type', c.propertyType || 'Residential', 'Year / SqFt',
-          `${c.yearBuilt || 'N/A'}  •  ${c.squareFootage || 'N/A'}`]
-      ];
-
-      pdf.setDrawColor(...LIGHT);
-      pdf.setFillColor(...BG_LIGHT);
-
-      const colWidths = [32, cW / 2 - 32, 32, cW / 2 - 32];
-      const rowH = 8;
-
-      infoRows.forEach(row => {
-        checkPage(rowH + 2);
-        let x = M;
-        row.forEach((cell, ci) => {
-          if (ci % 2 === 0) {
-            // Label cell
-            pdf.setFillColor(...BG_LIGHT);
-            pdf.rect(x, y, colWidths[ci], rowH, 'FD');
-            pdf.setFont('helvetica', 'bold');
-            pdf.setFontSize(8);
-            pdf.setTextColor(...BLACK);
-            pdf.text(cell, x + 2, y + 5.5);
-          } else {
-            // Value cell
-            pdf.setFillColor(...WHITE);
-            pdf.rect(x, y, colWidths[ci], rowH, 'FD');
-            pdf.setFont('helvetica', 'normal');
-            pdf.setFontSize(8);
-            pdf.setTextColor(...BLACK);
-            const valLines = pdf.splitTextToSize(cell, colWidths[ci] - 4);
-            pdf.text(valLines[0] || '', x + 2, y + 5.5);
+      const resp = await fetch(apiUrl('/api/export-pdf'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: State.activeReportId,
+          fileName: pdfFilename,
+          clientInfo: State.clientInfo,
+          sections: State.sections,
+          coverPhoto: selectedPdfCoverPhoto,
+          inspectorInfo: {
+            companyName: companyName,
+            inspectorName: inspectorName,
+            phone: phone,
+            email: email,
+            officeAddress: officeAddress
           }
-          x += colWidths[ci];
-        });
-        y += rowH;
+        })
       });
 
-      y += 8;
-
-      // ========== SECTIONS & ITEMS ==========
-      (sections || []).forEach(sec => {
-        // Section header
-        checkPage(14);
-        pdf.setFillColor(...ACCENT);
-        pdf.rect(M, y, cW, 9, 'F');
-        pdf.setFont('helvetica', 'bold');
-        pdf.setFontSize(11);
-        pdf.setTextColor(...WHITE);
-        pdf.text(sec.name || 'Section', M + 4, y + 6.5);
-        y += 12;
-
-        (sec.items || []).forEach(it => {
-          const status = it.status || 'Not Inspected';
-          const sc = STATUS_COLORS[status] || STATUS_COLORS['Not Inspected'];
-          const comments = it.comments || '';
-          const photos = (it.photos || []).filter(p => p.dataUrl);
-
-          // Calculate needed height
-          const commentLines = comments ? getLines(comments, cW - 14, 8) : [];
-          let itemH = 10; // title row
-          if (commentLines.length > 0) itemH += commentLines.length * 3.5 + 2;
-          if (photos.length > 0) itemH += 45; // photo row height
-
-          checkPage(Math.min(itemH + 4, 80)); // don't exceed page
-
-          // Item background
-          pdf.setFillColor(...sc.bg);
-          const bgH = Math.min(itemH, pageH - M - y);
-          pdf.rect(M, y, cW, bgH, 'F');
-
-          // Left border
-          pdf.setFillColor(...sc.border);
-          pdf.rect(M, y, 2.5, bgH, 'F');
-
-          // Item name
-          pdf.setFont('helvetica', 'bold');
-          pdf.setFontSize(9);
-          pdf.setTextColor(...BLACK);
-          pdf.text(it.name || 'Item', M + 6, y + 6);
-
-          // Status badge
-          pdf.setFont('helvetica', 'normal');
-          pdf.setFontSize(7);
-          pdf.setTextColor(...sc.border);
-          pdf.text(status.toUpperCase(), pageW - M - 4, y + 6, { align: 'right' });
-
-          y += 10;
-
-          // Comments
-          if (commentLines.length > 0) {
-            pdf.setFont('helvetica', 'normal');
-            pdf.setFontSize(8);
-            pdf.setTextColor(51, 65, 85);
-            commentLines.forEach(line => {
-              checkPage(5);
-              pdf.text(line, M + 6, y);
-              y += 3.5;
-            });
-            y += 1;
-          }
-
-          // Photos
-          if (photos.length > 0) {
-            let px = M + 6;
-            const photoW = (cW - 16) / Math.min(photos.length, 3);
-            const photoH = 38;
-
-            checkPage(photoH + 6);
-
-            photos.slice(0, 6).forEach((p, pi) => {
-              if (pi > 0 && pi % 3 === 0) {
-                // New row
-                px = M + 6;
-                y += photoH + 4;
-                checkPage(photoH + 6);
-              }
-
-              try {
-                // Determine image format from dataUrl
-                let fmt = 'JPEG';
-                if (p.dataUrl.includes('image/png')) fmt = 'PNG';
-
-                pdf.addImage(p.dataUrl, fmt, px, y, photoW - 4, photoH - 6);
-
-                // Caption
-                pdf.setFont('helvetica', 'italic');
-                pdf.setFontSize(6);
-                pdf.setTextColor(...GRAY);
-                const caption = (p.caption || p.filename || it.name || '').substring(0, 30);
-                pdf.text(caption, px, y + photoH - 4);
-              } catch (imgErr) {
-                // [STEP 2e] Wrap each pdf.addImage call to log real error
-                console.error("DEBUG: pdf.addImage failed:", {
-                  format: p.dataUrl.includes('image/png') ? 'PNG' : 'JPEG',
-                  dataUrlPrefix: (p.dataUrl || '').substring(0, 30),
-                  dataUrlLength: (p.dataUrl || '').length,
-                  errorMessage: imgErr.message,
-                  errorStack: imgErr.stack
-                });
-                pdf.setFont('helvetica', 'italic');
-                pdf.setFontSize(7);
-                pdf.setTextColor(...GRAY);
-                pdf.text('[Image Error]', px + 2, y + 10);
-              }
-
-              px += photoW;
-            });
-
-            y += photoH + 2;
-          }
-
-          y += 3; // gap between items
-        });
-
-        y += 4; // gap between sections
-      });
-
-      // ========== FOOTER LINE ==========
-      checkPage(15);
-      y += 5;
-      pdf.setDrawColor(...LIGHT);
-      pdf.line(M, y, pageW - M, y);
-      y += 5;
-      pdf.setFont('helvetica', 'italic');
-      pdf.setFontSize(7);
-      pdf.setTextColor(...GRAY);
-      pdf.text(`Generated by HZF Inspector Studio  •  ${new Date().toLocaleDateString()}`, M, y);
-
-      // Add page numbers
-      const totalPages = pdf.internal.getNumberOfPages();
-      for (let i = 1; i <= totalPages; i++) {
-        pdf.setPage(i);
-        pdf.setFont('helvetica', 'normal');
-        pdf.setFontSize(7);
-        pdf.setTextColor(...GRAY);
-        pdf.text(`Page ${i} of ${totalPages}`, pageW - M, pageH - 8, { align: 'right' });
+      if (!resp.ok) {
+        const errJson = await resp.json().catch(() => ({}));
+        throw new Error(errJson.detail || `Server returned HTTP ${resp.status}`);
       }
 
-      // [STEP 2d] Log right before pdf.save()
-      const blobSize = pdf.output('blob').size;
-      const finalPages = pdf.internal.getNumberOfPages();
-      console.log("DEBUG: PDF Pre-Save Stats:", {
-        numberOfPages: finalPages,
-        finalValueOfY: y,
-        blobSizeBytes: blobSize
-      });
+      if (statusTxt) statusTxt.textContent = "Downloading PDF to your computer...";
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = pdfFilename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
 
-      pdf.save(pdfFilename);
-      showToast(`✅ Downloaded ${pdfFilename}!`);
-
+      const modal = document.getElementById('exportPdfModal');
+      if (modal) modal.style.display = 'none';
+      showToast(`🎉 Downloaded ${pdfFilename}!`);
     } catch (err) {
-      // [STEP 2a] Remove window.print fallback, log full stack and show toast with err.message
-      console.error("DEBUG: PDF generation exception caught:", err.stack || err);
-      showToast(`PDF Error: ${err.message}`);
+      alert("PDF Generation Failed: " + err.message);
+    } finally {
+      if (overlay) overlay.style.display = 'none';
     }
+  }
+
+  function downloadPdfReport() {
+    openExportPdfModal();
   }
 
   // Fast Export for .hzf and .bin containers
@@ -2321,12 +2879,19 @@
 
     // Saved Reports Modal
     const savedModal = document.getElementById('savedReportsModal');
-    document.getElementById('btnOpenSavedReports')?.addEventListener('click', () => {
+    function openSavedReportsModal() {
       loadSavedReportsModal();
       if (savedModal) savedModal.style.display = 'flex';
-    });
+    }
+
+    document.getElementById('btnOpenSavedReports')?.addEventListener('click', openSavedReportsModal);
+    document.getElementById('btnWelcomeOpenSaved')?.addEventListener('click', openSavedReportsModal);
+    document.getElementById('welcomeSavedReportsCard')?.addEventListener('click', openSavedReportsModal);
     document.getElementById('btnCloseSavedReportsModal')?.addEventListener('click', () => { if (savedModal) savedModal.style.display = 'none'; });
     document.getElementById('btnDismissSavedReports')?.addEventListener('click', () => { if (savedModal) savedModal.style.display = 'none'; });
+    savedModal?.addEventListener('click', (e) => {
+      if (e.target === savedModal) savedModal.style.display = 'none';
+    });
 
     // Save and Export Triggers
     document.getElementById('btnSaveToLibrary')?.addEventListener('click', saveActiveReport);
@@ -2334,8 +2899,83 @@
     document.getElementById('btnSaveHzf')?.addEventListener('click', () => exportFile('hzf'));
     document.getElementById('btnSaveBin')?.addEventListener('click', () => exportFile('bin'));
 
-    // In Report Tab: Direct PDF download
+    // In Report Tab: Direct PDF download and Live Preview Controls
     document.getElementById('btnDownloadPdfTab')?.addEventListener('click', () => downloadPdfReport());
+    document.getElementById('btnRefreshPdfPreview')?.addEventListener('click', () => loadPdfPreview(true));
+    document.getElementById('btnOpenPdfNewTab')?.addEventListener('click', () => openPdfInNewTab());
+    document.getElementById('btnPdfPrevPage')?.addEventListener('click', () => {
+      if (State.pdfDoc && State.pdfCurrentPage > 1) {
+        renderPdfPage(State.pdfCurrentPage - 1);
+      }
+    });
+    document.getElementById('btnPdfNextPage')?.addEventListener('click', () => {
+      if (State.pdfDoc && State.pdfCurrentPage < State.pdfTotalPages) {
+        renderPdfPage(State.pdfCurrentPage + 1);
+      }
+    });
+    document.getElementById('pdfPageIndicator')?.addEventListener('click', () => {
+      if (!State.pdfTotalPages || State.pdfTotalPages <= 1) return;
+      const target = prompt(`Go to page (1 - ${State.pdfTotalPages}):`, State.pdfCurrentPage || 1);
+      if (target) {
+        const pNum = parseInt(target, 10);
+        if (!isNaN(pNum) && pNum >= 1 && pNum <= State.pdfTotalPages) {
+          renderPdfPage(pNum);
+        }
+      }
+    });
+
+    document.getElementById('btnPdfFitPage')?.addEventListener('click', () => {
+      State.pdfFitMode = 'page';
+      State.pdfCurrentScale = null;
+      renderPdfPage(State.pdfCurrentPage || 1, true);
+    });
+
+    document.getElementById('btnPdfFitWidth')?.addEventListener('click', () => {
+      State.pdfFitMode = 'width';
+      State.pdfCurrentScale = null;
+      renderPdfPage(State.pdfCurrentPage || 1, true);
+    });
+
+    document.getElementById('btnPdfZoomOut')?.addEventListener('click', () => {
+      const cur = State.pdfCurrentScale || 1.0;
+      State.pdfFitMode = 'custom';
+      State.pdfCurrentScale = Math.max(0.25, cur * 0.85);
+      renderPdfPage(State.pdfCurrentPage || 1, false);
+    });
+
+    document.getElementById('btnPdfZoomIn')?.addEventListener('click', () => {
+      const cur = State.pdfCurrentScale || 1.0;
+      State.pdfFitMode = 'custom';
+      State.pdfCurrentScale = Math.min(4.0, cur * 1.15);
+      renderPdfPage(State.pdfCurrentPage || 1, false);
+    });
+
+    window.addEventListener('keydown', (e) => {
+      const tabReport = document.getElementById('tabReport');
+      if (!tabReport || tabReport.style.display === 'none') return;
+      if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+      if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        if (State.pdfDoc && State.pdfCurrentPage > 1) {
+          e.preventDefault();
+          renderPdfPage(State.pdfCurrentPage - 1);
+        }
+      } else if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+        if (State.pdfDoc && State.pdfCurrentPage < State.pdfTotalPages) {
+          e.preventDefault();
+          renderPdfPage(State.pdfCurrentPage + 1);
+        }
+      }
+    });
+
+    window.addEventListener('resize', () => {
+      const tabReport = document.getElementById('tabReport');
+      if (tabReport && tabReport.style.display !== 'none' && State.pdfDoc) {
+        clearTimeout(window._pdfResizeTimer);
+        window._pdfResizeTimer = setTimeout(() => {
+          renderPdfPage(State.pdfCurrentPage || 1);
+        }, 150);
+      }
+    });
 
     const printRepBtn = document.getElementById('btnPrintReport');
     if (printRepBtn) {
@@ -2447,7 +3087,12 @@
         if (tabP) tabP.style.display = (target === 'property') ? 'block' : 'none';
         if (tabR) tabR.style.display = (target === 'report') ? 'block' : 'none';
 
-        if (target === 'report') renderReport();
+        if (target === 'report') {
+          // Auto-generate preview if we have data but no cached PDF yet
+          if (State.sections && State.sections.length > 0) {
+            loadPdfPreview(!State.cachedPdfBlobUrl || State.pdfDirty);
+          }
+        }
       });
     });
 
@@ -2685,6 +3330,41 @@
           showToast("Summary copied to clipboard!");
         });
       }
+    });
+
+    // Export PDF Modal Listeners
+    const exportPdfModal = document.getElementById('exportPdfModal');
+    const pdfCoverFileInput = document.getElementById('pdfCoverFileInput');
+    document.getElementById('btnCloseExportPdfModal')?.addEventListener('click', () => { if (exportPdfModal) exportPdfModal.style.display = 'none'; });
+    document.getElementById('btnCancelExportPdf')?.addEventListener('click', () => { if (exportPdfModal) exportPdfModal.style.display = 'none'; });
+    document.getElementById('btnSubmitGeneratePdf')?.addEventListener('click', submitGeneratePdf);
+
+    document.getElementById('btnUploadCoverFile')?.addEventListener('click', () => {
+      pdfCoverFileInput?.click();
+    });
+
+    pdfCoverFileInput?.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files[0]) {
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          setCoverPhoto(evt.target.result, 'upload', `Custom Upload: ${e.target.files[0].name}`);
+          document.querySelectorAll('.report-thumb-card').forEach(c => c.classList.remove('selected'));
+        };
+        reader.readAsDataURL(e.target.files[0]);
+      }
+    });
+
+    document.getElementById('btnToggleReportPhotos')?.addEventListener('click', () => {
+      const drawer = document.getElementById('reportPhotosDrawer');
+      if (drawer) {
+        drawer.style.display = (drawer.style.display === 'none') ? 'block' : 'none';
+      }
+    });
+
+    document.getElementById('btnResetCoverPhoto')?.addEventListener('click', () => {
+      setCoverPhoto(null, 'default', 'Default Bundled Hero');
+      document.querySelectorAll('.report-thumb-card').forEach(c => c.classList.remove('selected'));
+      showToast("Reset cover photo to default hero");
     });
 
     if (window.lucide) lucide.createIcons();

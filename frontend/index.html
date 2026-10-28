@@ -22,7 +22,15 @@
     }
   </script>
 
-  <link rel="stylesheet" href="styles.css?v=202">
+  <!-- PDF.js for cross-browser PDF rendering (Brave blocks native embed/iframe) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+  </script>
+
+  <link rel="stylesheet" href="styles.css?v=218">
 </head>
 <body>
   <div class="app-shell">
@@ -224,6 +232,16 @@
             <h3>Build New Inspection</h3>
             <p>Start fresh from photos & notes taken on your mobile phone.</p>
             <button class="btn btn-accent btn-sm" id="btnCreateBlank">Start Blank Inspection</button>
+          </div>
+
+          <!-- Saved Reports Library Card -->
+          <div class="action-card" id="welcomeSavedReportsCard" style="cursor: pointer;">
+            <div class="action-icon" style="color: var(--accent);">
+              <i data-lucide="archive"></i>
+            </div>
+            <h3>Saved Reports Library</h3>
+            <p>Access, edit, and download previously saved inspection reports.</p>
+            <button class="btn btn-outline btn-sm" id="btnWelcomeOpenSaved">Open Saved Reports (<span id="welcomeSavedCount">0</span>)</button>
           </div>
 
         </div>
@@ -432,22 +450,94 @@
           </div>
         </div>
 
-        <!-- TAB 3: Printable Report -->
+        <!-- TAB 3: Printable Report (Live Native PDF Engine Preview) -->
         <div class="tab-panel" id="tabReport" style="display: none;">
-          <div class="report-wrapper">
-            <div class="report-top-actions no-print">
-              <button class="btn btn-primary" id="btnDownloadPdfTab" title="Download exact PDF document directly">
-                <i data-lucide="download"></i>
-                <span>Download PDF Report</span>
-              </button>
-              <button class="btn btn-outline" onclick="window.print()" title="Print using browser dialog">
-                <i data-lucide="printer"></i>
-                <span>Print / System Dialog</span>
-              </button>
+          <div class="pdf-preview-workspace">
+            <div class="pdf-preview-toolbar no-print">
+              <div class="pdf-toolbar-left">
+                <span class="pdf-badge-format">
+                  <i data-lucide="file-check"></i>
+                  <span>Live PDF Engine Preview</span>
+                </span>
+                <span id="pdfPreviewStatus" class="pdf-status-tag">
+                  <i data-lucide="check-circle-2"></i>
+                  <span>Ready</span>
+                </span>
+              </div>
+              <div class="pdf-toolbar-right">
+                <button class="btn btn-outline btn-sm" id="btnRefreshPdfPreview" title="Recompile preview with current inspection data">
+                  <i data-lucide="refresh-cw"></i>
+                  <span>Refresh Preview</span>
+                </button>
+                <button class="btn btn-outline btn-sm" id="btnOpenPdfNewTab" title="Open full vector PDF in browser window">
+                  <i data-lucide="external-link"></i>
+                  <span>Open in New Tab</span>
+                </button>
+                <button class="btn btn-primary btn-sm" id="btnDownloadPdfTab" title="Configure options and download PDF document">
+                  <i data-lucide="download"></i>
+                  <span>Download PDF</span>
+                </button>
+              </div>
             </div>
 
-            <div class="report-sheet" id="reportSheet">
-              <!-- Dynamically rendered -->
+            <!-- PDF Viewer Stage -->
+            <div class="pdf-viewer-stage" id="pdfViewerStage" style="width: 100%; height: calc(100vh - 180px); min-height: 500px; position: relative; background: #323639; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column;">
+              <!-- Loading Overlay -->
+              <div class="pdf-loading-overlay" id="pdfLoadingOverlay" style="display: none;">
+                <div class="pdf-loading-card">
+                  <div class="pdf-loading-spinner"></div>
+                  <h4 class="pdf-loading-title">Generating Exact PDF Preview</h4>
+                  <p class="pdf-loading-desc" id="pdfLoadingText">Compiling vector pages, running headers, status matrices, and high-resolution photo grids...</p>
+                  <div class="pdf-loading-bar-wrap">
+                    <div class="pdf-loading-bar-fill"></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- PDF.js Canvas-based PDF Viewer (works in ALL browsers including Brave) -->
+              <div id="pdfCanvasViewer" class="pdf-canvas-viewer" style="display: none;">
+                <div class="pdf-page-nav">
+                  <div class="pdf-nav-group">
+                    <button class="btn btn-ghost btn-sm" id="btnPdfPrevPage" title="Previous Page (Left Arrow)">
+                      <i data-lucide="chevron-left"></i>
+                    </button>
+                    <span class="pdf-page-indicator" id="pdfPageIndicator" title="Click to jump to any page">Page 1 / 1</span>
+                    <button class="btn btn-ghost btn-sm" id="btnPdfNextPage" title="Next Page (Right Arrow)">
+                      <i data-lucide="chevron-right"></i>
+                    </button>
+                  </div>
+                  <div class="pdf-nav-divider"></div>
+                  <div class="pdf-zoom-group">
+                    <button class="btn btn-ghost btn-sm active" id="btnPdfFitPage" title="Fit Whole Page to Screen">
+                      <i data-lucide="maximize-2"></i>
+                      <span>Fit Page</span>
+                    </button>
+                    <button class="btn btn-ghost btn-sm" id="btnPdfFitWidth" title="Fit Page to Width">
+                      <i data-lucide="move-horizontal"></i>
+                      <span>Fit Width</span>
+                    </button>
+                    <button class="btn btn-ghost btn-sm" id="btnPdfZoomOut" title="Zoom Out">
+                      <i data-lucide="minus"></i>
+                    </button>
+                    <span id="pdfZoomLevel" style="font-family: monospace; font-size: 0.8rem; min-width: 42px; text-align: center; color: #cbd5e1;">Fit</span>
+                    <button class="btn btn-ghost btn-sm" id="btnPdfZoomIn" title="Zoom In">
+                      <i data-lucide="plus"></i>
+                    </button>
+                  </div>
+                </div>
+                <div class="pdf-canvas-scroll" id="pdfCanvasScroll">
+                  <!-- Canvas elements rendered by PDF.js -->
+                </div>
+              </div>
+
+              <!-- Fallback / Empty State -->
+              <div class="pdf-empty-state" id="pdfEmptyState">
+                <div class="pdf-empty-icon">
+                  <i data-lucide="file-question" style="width: 48px; height: 48px;"></i>
+                </div>
+                <h3>Click "Refresh Preview" to Generate PDF</h3>
+                <p>Your inspection report will be compiled and displayed here as a live interactive PDF.</p>
+              </div>
             </div>
           </div>
         </div>
@@ -707,6 +797,116 @@
       </div>
     </div>
 
+    <!-- MODAL 9: Export PDF with Cover Photo Upload & Inspector Customization -->
+    <div class="modal-layer" id="exportPdfModal" style="display: none;">
+      <div class="modal-box modal-box-lg">
+        <div class="modal-header">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="file-text" style="color: #dc2626; width: 20px; height: 20px;"></i>
+            <h3>Download Visual PDF Report</h3>
+          </div>
+          <button class="btn-close" id="btnCloseExportPdfModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="pdf-modal-tip text-muted">
+            Generates the exact visual Home Inspector Pro layout matching <strong>Mantra Mirari Flat No.E-404.pdf</strong> with royal blue borders, status matrices, photo galleries, and report summary.
+          </p>
+
+          <!-- Cover Photo Picker & Upload -->
+          <div class="cover-photo-section">
+            <h4 class="cover-section-title">
+              <i data-lucide="image" style="width: 16px; height: 16px; color: var(--accent);"></i>
+              <span>Page 1 Cover Photo (Building / House Exterior)</span>
+            </h4>
+            
+            <div class="cover-photo-preview-card">
+              <div class="cover-photo-frame" id="pdfCoverPreviewFrame">
+                <img id="pdfCoverPreviewImg" src="" alt="Cover Photo Preview" style="display: none;" />
+                <div id="pdfCoverPlaceholder" class="cover-photo-empty">
+                  <i data-lucide="image" style="width: 32px; height: 32px; opacity: 0.4;"></i>
+                  <span>No cover photo selected</span>
+                </div>
+              </div>
+
+              <div class="cover-photo-actions">
+                <input type="file" id="pdfCoverFileInput" accept="image/jpeg,image/png,image/webp" style="display: none;" />
+                <div class="cover-actions-button-group">
+                  <button type="button" class="btn btn-outline btn-sm" id="btnUploadCoverFile">
+                    <i data-lucide="upload"></i>
+                    <span>Upload Building Photo</span>
+                  </button>
+                  <button type="button" class="btn btn-outline btn-sm" id="btnToggleReportPhotos">
+                    <i data-lucide="images"></i>
+                    <span>Choose from Report Photos (<span id="reportPhotosCount">0</span>)</span>
+                  </button>
+                  <button type="button" class="btn btn-ghost btn-sm" id="btnResetCoverPhoto">
+                    <i data-lucide="rotate-ccw"></i>
+                    <span>Default Hero</span>
+                  </button>
+                </div>
+                <div class="cover-source-indicator">
+                  <span>Selected Source: </span>
+                  <strong id="coverSourceLabel" style="color: var(--accent);">Default Bundled Hero</strong>
+                </div>
+              </div>
+            </div>
+
+            <!-- Expandable Inspection Photo Gallery Grid for 1-click cover selection -->
+            <div class="report-photos-drawer" id="reportPhotosDrawer" style="display: none;">
+              <div class="drawer-instruction">Click any photo from your inspection items to set as Page 1 Cover:</div>
+              <div class="report-photos-grid" id="reportPhotosGrid">
+                <!-- Dynamically populated with inspection item photos -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Inspector & Company Details Customizer -->
+          <div class="pdf-meta-section">
+            <h4 class="cover-section-title">
+              <i data-lucide="user-check" style="width: 16px; height: 16px; color: var(--accent);"></i>
+              <span>Inspector & Company Branding</span>
+            </h4>
+            <div class="form-grid pdf-branding-grid">
+              <div class="form-field">
+                <label for="pdfCompanyName">Inspection Company</label>
+                <input type="text" id="pdfCompanyName" class="input-clean" placeholder="N G Home Inspection Services">
+              </div>
+              <div class="form-field">
+                <label for="pdfInspectorName">Inspector Name</label>
+                <input type="text" id="pdfInspectorName" class="input-clean" placeholder="Nitin Gujarathi">
+              </div>
+              <div class="form-field">
+                <label for="pdfInspectorPhone">Phone Number</label>
+                <input type="text" id="pdfInspectorPhone" class="input-clean" placeholder="00919890002635">
+              </div>
+              <div class="form-field">
+                <label for="pdfInspectorEmail">Email Address</label>
+                <input type="email" id="pdfInspectorEmail" class="input-clean" placeholder="niting@macj.in">
+              </div>
+              <div class="form-field full">
+                <label for="pdfInspectorAddress">Office Address</label>
+                <input type="text" id="pdfInspectorAddress" class="input-clean" placeholder="4_4 Yugaymangal complex, Kothrud, Pune, Maharashtra 411038">
+              </div>
+            </div>
+          </div>
+
+          <!-- Loading state overlay during generation -->
+          <div class="pdf-generating-overlay" id="pdfGeneratingOverlay" style="display: none;">
+            <div class="spinner"></div>
+            <div class="generating-text" id="pdfGeneratingStatus">Compiling inspection report and high-res photos...</div>
+            <div class="generating-sub">Rendering vector borders, status matrices, and summary tables via backend ReportLab engine</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="btnCancelExportPdf">Cancel</button>
+          <button class="btn btn-primary btn-generate-pdf" id="btnSubmitGeneratePdf">
+            <i data-lucide="download"></i>
+            <span>Generate & Download PDF</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Toast Notification -->
     <div class="toast" id="toastMessage"></div>
 
@@ -722,8 +922,8 @@
       }
     } catch(e) {}
   </script>
-  <script src="config.js?v=203"></script>
-  <script src="app.js?v=203"></script>
+  <script src="config.js?v=218"></script>
+  <script src="app.js?v=218"></script>
 </body>
 </html>
 

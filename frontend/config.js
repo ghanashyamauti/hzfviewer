@@ -9,31 +9,36 @@
 
   window.ENV = window.ENV || {};
 
-  // 1. Synchronously fetch and parse frontend .env file
-  try {
-    const xhr = new XMLHttpRequest();
-    xhr.open('GET', '.env', false); // Synchronous: ensures variables are loaded before app.js runs
-    xhr.send(null);
-    if ((xhr.status === 200 || xhr.status === 0) && xhr.responseText) {
-      const lines = xhr.responseText.split(/\r?\n/);
-      for (const rawLine of lines) {
-        const line = rawLine.trim();
-        if (!line || line.startsWith('#')) continue;
-        const eqIdx = line.indexOf('=');
-        if (eqIdx > 0) {
-          const key = line.slice(0, eqIdx).trim();
-          let val = line.slice(eqIdx + 1).trim();
-          if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-            val = val.slice(1, -1);
-          }
-          if (key) {
-            window.ENV[key] = val;
+  const isLocal = typeof window !== 'undefined' && 
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+  // 1. Synchronously fetch and parse frontend .env file (skip on local dev server where Vite denies .env with 403)
+  if (!isLocal && !window.ENV.API_BASE_URL) {
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', '.env', false); // Synchronous: ensures variables are loaded before app.js runs
+      xhr.send(null);
+      if ((xhr.status === 200 || xhr.status === 0) && xhr.responseText) {
+        const lines = xhr.responseText.split(/\r?\n/);
+        for (const rawLine of lines) {
+          const line = rawLine.trim();
+          if (!line || line.startsWith('#')) continue;
+          const eqIdx = line.indexOf('=');
+          if (eqIdx > 0) {
+            const key = line.slice(0, eqIdx).trim();
+            let val = line.slice(eqIdx + 1).trim();
+            if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+              val = val.slice(1, -1);
+            }
+            if (key) {
+              window.ENV[key] = val;
+            }
           }
         }
       }
+    } catch (err) {
+      // Graceful fallback if static server does not serve dotfiles directly
     }
-  } catch (err) {
-    // Graceful fallback if static server does not serve dotfiles directly
   }
 
   // 2. Query parameter override (e.g., ?api=https://...)

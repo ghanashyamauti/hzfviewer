@@ -25,6 +25,7 @@ from ai_service import (
     generate_executive_summary
 )
 from qa_validator import audit_inspection
+from pdf_generator import generate_hip_inspection_pdf
 
 # Load environment configuration from backend/.env or parent .env
 backend_env = os.path.join(os.path.dirname(__file__), ".env")
@@ -55,6 +56,12 @@ app = FastAPI(
     debug=DEBUG_MODE
 )
 
+# Mount static assets for wall diagrams and default branding
+assets_path = os.path.join(os.path.dirname(__file__), "assets")
+if os.path.exists(assets_path):
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
+
 # CORS Setup for Vercel / Cloud Deployments
 if CORS_ORIGINS_ENV == "*":
     app.add_middleware(
@@ -80,6 +87,16 @@ class InspectionPayload(BaseModel):
     fileName: str = "Inspection_Report.hzf"
     clientInfo: Dict[str, Any] = {}
     sections: List[Dict[str, Any]] = []
+    coverPhoto: Optional[str] = None
+    inspectorInfo: Optional[Dict[str, str]] = None
+
+class ExportPdfPayload(BaseModel):
+    id: Optional[str] = None
+    fileName: str = "Inspection_Report.pdf"
+    clientInfo: Dict[str, Any] = {}
+    sections: List[Dict[str, Any]] = []
+    coverPhoto: Optional[str] = None
+    inspectorInfo: Optional[Dict[str, str]] = None
 
 class PolishItemPayload(BaseModel):
     sectionName: str
@@ -296,6 +313,27 @@ async def export_bin(payload: InspectionPayload):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate .bin: {str(e)}")
+
+@app.post("/api/export-pdf")
+async def export_pdf(payload: ExportPdfPayload):
+    """Package inspection data into a visual PDF report matching HIP standard."""
+    try:
+        pdf_bytes = generate_hip_inspection_pdf(
+            inspection_data=payload.dict(),
+            custom_cover_image=payload.coverPhoto,
+            custom_inspector_info=payload.inspectorInfo
+        )
+        filename = payload.fileName
+        if not filename.lower().endswith('.pdf'):
+            filename = os.path.splitext(filename)[0] + '.pdf'
+
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{filename}"'}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate PDF: {str(e)}")
 
 # ==============================================================================
 # AUTOMATED AI & QA REVIEW ENDPOINTS
