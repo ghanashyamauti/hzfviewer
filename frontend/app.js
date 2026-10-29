@@ -8,7 +8,7 @@
 (function () {
   'use strict';
 
-  console.log("app.js build 2026-10-15T16:25:00-debug");
+  console.log("app.js build 2026-10-29T10:00:00-persist");
 
   const State = {
     isInspectionActive: false,
@@ -27,8 +27,332 @@
     pdfFitMode: 'page',
     pdfZoom: 1.0,
     pdfCurrentScale: null,
-    currentRenderTask: null
+    currentRenderTask: null,
+    isDirty: false,
+    activeTab: 'checklist'
   };
+
+  // ==========================================================================
+  // BULLETPROOF PERSISTENCE ENGINE (DUAL-TIER SYNCHRONOUS + ASYNC STORAGE)
+  // Tier 1: Instant Synchronous SessionStorage (Structure, Findings, Notes, Status)
+  // Tier 2: Dedicated IndexedDB Stores (High-Res Photos & Complete Backups)
+  // Guarantees that refreshing (F5 / reload) STAYS on the active inspection!
+  // ==========================================================================
+
+  const IDB_NAME = 'hzf_studio_storage_v4';
+  const IDB_VERSION = 1;
+  let _idbInstance = null;
+
+  function getSessionIdb() {
+    if (_idbInstance) return Promise.resolve(_idbInstance);
+    return new Promise((resolve) => {
+      if (!window.indexedDB) return resolve(null);
+      try {
+        const req = window.indexedDB.open(IDB_NAME, IDB_VERSION);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains('photos')) {
+            db.createObjectStore('photos');
+          }
+          if (!db.objectStoreNames.contains('full_session')) {
+            db.createObjectStore('full_session');
+          }
+        };
+        req.onsuccess = () => {
+          _idbInstance = req.result;
+          _idbInstance.onversionchange = () => {
+            _idbInstance.close();
+            _idbInstance = null;
+          };
+          resolve(_idbInstance);
+        };
+        req.onerror = () => resolve(null);
+        req.onblocked = () => resolve(null);
+      } catch (err) {
+        resolve(null);
+      }
+    });
+  }
+
+  async function idbSavePhotos(photosMap) {
+    const db = await getSessionIdb();
+    if (!db) return;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction('photos', 'readwrite');
+        const store = tx.objectStore('photos');
+        for (const [filename, dataUrl] of Object.entries(photosMap)) {
+          if (dataUrl && dataUrl.startsWith('data:')) {
+            store.put(dataUrl, filename);
+          }
+        }
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
+      } catch (e) {
+        resolve(false);
+      }
+    });
+  }
+
+  async function idbGetPhotos(filenames) {
+    const db = await getSessionIdb();
+    if (!db || !filenames || filenames.length === 0) return {};
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction('photos', 'readonly');
+        const store = tx.objectStore('photos');
+        const map = {};
+        let pending = filenames.length;
+        if (pending === 0) return resolve(map);
+
+        filenames.forEach(fn => {
+          const req = store.get(fn);
+          req.onsuccess = () => {
+            if (req.result) map[fn] = req.result;
+            pending--;
+            if (pending <= 0) resolve(map);
+          };
+          req.onerror = () => {
+            pending--;
+            if (pending <= 0) resolve(map);
+          };
+        });
+      } catch (e) {
+        resolve({});
+      }
+    });
+  }
+
+  async function idbSaveFullSession(payload) {
+    const db = await getSessionIdb();
+    if (!db) return;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction('full_session', 'readwrite');
+        const store = tx.objectStore('full_session');
+        store.put(payload, 'active');
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
+      } catch (e) {
+        resolve(false);
+      }
+    });
+  }
+
+  async function idbGetFullSession() {
+    const db = await getSessionIdb();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction('full_session', 'readonly');
+        const store = tx.objectStore('full_session');
+        const req = store.get('active');
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+        tx.onerror = () => resolve(null);
+      } catch (e) {
+        resolve(null);
+      }
+    });
+  }
+
+  let _saveDebounceTimer = null;
+  function debouncedSaveSession() {
+    if (_saveDebounceTimer) clearTimeout(_saveDebounceTimer);
+    _saveDebounceTimer = setTimeout(() => {
+      saveActiveSession();
+    }, 200);
+  }
+
+  async function saveActiveSession() {
+    if (!State.isInspectionActive || !State.sections || State.sections.length === 0) {
+      return;
+    }
+
+    const activeTabEl = document.querySelector('.nav-tab.active');
+    const currentTab = activeTabEl ? activeTabEl.getAttribute('data-tab') : (State.activeTab || 'checklist');
+
+    // Build photo map and lightweight structure for instant sessionStorage persistence
+    const photosMap = {};
+    let totalPhotoBytes = 0;
+
+    const lightweightSections = (State.sections || []).map(sec => ({
+      id: sec.id,
+      name: sec.name,
+      desc: sec.desc || '',
+      items: (sec.items || []).map(it => {
+        const photoRefs = (it.photos || []).map(p => {
+          if (p.filename && p.dataUrl) {
+            photosMap[p.filename] = p.dataUrl;
+            totalPhotoBytes += p.dataUrl.length;
+          }
+          return {
+            filename: p.filename,
+            caption: p.caption || '',
+            // If total photo payload is small (< 2MB), keep dataUrl in sessionStorage too
+            dataUrl: (totalPhotoBytes < 2000000) ? (p.dataUrl || '') : ''
+          };
+        });
+
+        return {
+          id: it.id,
+          name: it.name,
+          status: it.status,
+          comments: it.comments || '',
+          photos: photoRefs
+        };
+      })
+    }));
+
+    const sessionPayload = {
+      isInspectionActive: true,
+      fileName: State.fileName || "Untitled_Inspection.hzf",
+      activeReportId: State.activeReportId || null,
+      clientInfo: State.clientInfo || {},
+      sections: lightweightSections,
+      activeSectionId: State.activeSectionId || null,
+      activeTab: currentTab,
+      isDirty: !!State.isDirty,
+      savedAt: Date.now()
+    };
+
+    // TIER 1: Save structure to sessionStorage (Synchronous, instant, never fails)
+    try {
+      sessionStorage.setItem('hzf_active_session_v4', JSON.stringify(sessionPayload));
+      localStorage.setItem('hzf_active_session_flag', '1');
+    } catch (e) {
+      console.warn("sessionStorage save error:", e);
+    }
+
+    // TIER 2: Save full photos and full payload to IndexedDB (asynchronous)
+    try {
+      if (Object.keys(photosMap).length > 0) {
+        idbSavePhotos(photosMap);
+      }
+      idbSaveFullSession({
+        ...sessionPayload,
+        sections: State.sections // full copy with all dataUrls
+      });
+    } catch (e) {
+      console.warn("IndexedDB background save error:", e);
+    }
+  }
+
+  async function getActiveSession() {
+    // 1. Try instant Tier 1 sessionStorage first (0 ms!)
+    let session = null;
+    try {
+      const raw = sessionStorage.getItem('hzf_active_session_v4');
+      if (raw) {
+        session = JSON.parse(raw);
+      }
+    } catch (e) {}
+
+    // 2. Try Tier 2 IndexedDB if sessionStorage was empty
+    if (!session) {
+      try {
+        session = await idbGetFullSession();
+      } catch (e) {}
+    }
+
+    if (!session || !session.sections || session.sections.length === 0) {
+      return null;
+    }
+
+    // 3. Hydrate photos from IndexedDB if dataUrls were omitted for size
+    try {
+      const missingPhotoFilenames = [];
+      session.sections.forEach(s => {
+        (s.items || []).forEach(it => {
+          (it.photos || []).forEach(p => {
+            if (p.filename && !p.dataUrl) {
+              missingPhotoFilenames.push(p.filename);
+            }
+          });
+        });
+      });
+
+      if (missingPhotoFilenames.length > 0) {
+        const photoMap = await idbGetPhotos(missingPhotoFilenames);
+        session.sections.forEach(s => {
+          (s.items || []).forEach(it => {
+            (it.photos || []).forEach(p => {
+              if (p.filename && photoMap[p.filename]) {
+                p.dataUrl = photoMap[p.filename];
+              }
+            });
+          });
+        });
+      }
+    } catch (e) {
+      console.warn("Error hydrating photos from IndexedDB:", e);
+    }
+
+    return session;
+  }
+
+  async function clearActiveSession() {
+    try {
+      sessionStorage.removeItem('hzf_active_session_v4');
+      localStorage.removeItem('hzf_active_session_flag');
+    } catch (e) {}
+    try {
+      const db = await getSessionIdb();
+      if (db) {
+        const tx = db.transaction(['full_session', 'photos'], 'readwrite');
+        tx.objectStore('full_session').clear();
+        tx.objectStore('photos').clear();
+      }
+    } catch (e) {}
+    State.isInspectionActive = false;
+    State.activeReportId = null;
+    State.fileName = "Untitled_Inspection.hzf";
+    State.clientInfo = {};
+    State.sections = [];
+    State.activeSectionId = null;
+    State.isDirty = false;
+  }
+
+  // Unsaved Changes Confirmation Modal Handlers
+  function showConfirmLeaveModal() {
+    const modal = document.getElementById('confirmLeaveModal');
+    if (modal) {
+      modal.style.display = 'flex';
+      if (window.lucide) lucide.createIcons();
+    } else {
+      fallbackConfirmLeave();
+    }
+  }
+
+  function hideConfirmLeaveModal() {
+    const modal = document.getElementById('confirmLeaveModal');
+    if (modal) {
+      modal.style.display = 'none';
+    }
+  }
+
+  async function fallbackConfirmLeave() {
+    const shouldSave = window.confirm(
+      "Do you want to save your inspection report before returning to the dashboard?\n\n" +
+      "Click OK to Save & Return, or Cancel to choose whether to discard or stay."
+    );
+    if (shouldSave) {
+      await saveActiveReport();
+      await clearActiveSession();
+      setWorkspaceActive(false, true);
+    } else {
+      const confirmDiscard = window.confirm(
+        "Are you sure you want to leave without saving?\n\n" +
+        "WARNING: Any unsaved inspection findings and photos will be gone!"
+      );
+      if (confirmDiscard) {
+        await clearActiveSession();
+        setWorkspaceActive(false, true);
+      }
+    }
+  }
 
   let selectedPdfCoverPhoto = null; // Base64 dataUrl or null (for default)
 
@@ -110,12 +434,13 @@
     refreshSavedReportsCount();
   }
 
-  // Back Navigation Helper to return to Welcome Dashboard
+  // Back Navigation Helper to return to Welcome Dashboard with Unsaved Confirmation
   function goBackHome() {
-    if (window.location.hash === '#workspace') {
-      window.history.back();
+    if (State.isInspectionActive && State.sections && State.sections.length > 0) {
+      showConfirmLeaveModal();
     } else {
-      setWorkspaceActive(false, false);
+      clearActiveSession();
+      setWorkspaceActive(false, true);
     }
   }
 
@@ -233,9 +558,11 @@
         const json = await resp.json();
         if (json.success) {
           State.activeReportId = json.id;
+          State.isDirty = false;
+          saveActiveSession();
           refreshSavedReportsCount();
           showToast("Inspection saved to library!");
-          return;
+          return true;
         }
       }
     } catch (e) {
@@ -249,14 +576,26 @@
         clientInfo: State.clientInfo,
         sections: State.sections
       }));
+      State.isDirty = false;
+      saveActiveSession();
       showToast("Saved to browser storage!");
+      return true;
     } catch (err) {
       showToast("Error saving: " + err.message);
+      return false;
     }
   }
 
   // Start Blank Inspection Template (Zero Hardcoded Data)
   async function startBlankInspection() {
+    if (State.isInspectionActive && State.sections && State.sections.length > 0 && State.isDirty) {
+      const confirmNew = window.confirm(
+        "You have unsaved changes in your current inspection! Do you want to start a new blank inspection?\n\n" +
+        "Click OK to proceed (unsaved changes will be replaced), or Cancel to stay."
+      );
+      if (!confirmNew) return;
+    }
+
     showToast("Initializing blank inspection...");
 
     // Try backend template
@@ -270,7 +609,9 @@
           State.clientInfo = json.data.clientInfo || {};
           State.sections = json.data.sections || [];
           State.activeSectionId = State.sections[0] ? State.sections[0].id : null;
+          State.isDirty = true;
           setWorkspaceActive(true);
+          saveActiveSession();
           showToast("Blank inspection ready. Add property details and mobile photos.");
           return;
         }
@@ -377,7 +718,9 @@
       }
     ];
     State.activeSectionId = State.sections[0].id;
+    State.isDirty = true;
     setWorkspaceActive(true);
+    saveActiveSession();
   }
 
   // Helper to sanitize XML strings from Java XMLDecoder (HIP) and generic inspection archives
@@ -796,6 +1139,14 @@
 
   // Load User's Actual .hzf or .bin File
   async function loadUserFile(file) {
+    if (State.isInspectionActive && State.sections && State.sections.length > 0 && State.isDirty) {
+      const confirmOpen = window.confirm(
+        "You have unsaved changes in your current inspection! Do you want to open another file?\n\n" +
+        "Click OK to proceed (unsaved changes will be replaced), or Cancel to stay."
+      );
+      if (!confirmOpen) return;
+    }
+
     showToast(`Parsing ${file.name}...`);
     State.fileName = file.name;
     State.activeReportId = null;
@@ -816,7 +1167,9 @@
           State.clientInfo = json.data.clientInfo || {};
           State.sections = json.data.sections || [];
           State.activeSectionId = State.sections[0] ? State.sections[0].id : null;
+          State.isDirty = false;
           setWorkspaceActive(true);
+          await saveActiveSession();
           showToast(`Loaded ${file.name}!`);
           return;
         }
@@ -977,13 +1330,15 @@
           ];
         } else {
           // Fallback to native Home Inspector Pro format
-          const hipResult = parseHomeInspectorProZip(xmlFiles, imageMap);
+          const hipResult = parseHipFormatJs(xmlFiles, imageMap);
           State.clientInfo = hipResult.clientInfo || {};
           State.sections = hipResult.sections || [];
         }
 
         State.activeSectionId = State.sections[0] ? State.sections[0].id : null;
+        State.isDirty = false;
         setWorkspaceActive(true);
+        await saveActiveSession();
         showToast(`Loaded ${file.name}!`);
       } catch (err) {
         showToast("Error reading file: " + err.message);
@@ -1034,6 +1389,7 @@
         State.activeSectionId = sec.id;
         renderSidebar();
         renderItems();
+        saveActiveSession();
       };
 
       list.appendChild(btn);
@@ -1166,6 +1522,9 @@
         }
       }
     });
+
+    State.isDirty = true;
+    debouncedSaveSession();
   }
 
   // Render Property Info Form
@@ -1659,8 +2018,10 @@
       const containerHeight = canvasScroll.clientHeight || 550;
       const baseViewport = page.getViewport({ scale: 1.0 });
 
-      const availW = Math.max(containerWidth - 40, 320);
-      const availH = Math.max(containerHeight - 40, 320);
+      const padW = containerWidth < 600 ? 12 : 40;
+      const padH = containerHeight < 600 ? 12 : 40;
+      const availW = Math.max(containerWidth - padW, 160);
+      const availH = Math.max(containerHeight - padH, 160);
       const fitPageScale = Math.min(availW / baseViewport.width, availH / baseViewport.height);
       const fitWidthScale = availW / baseViewport.width;
 
@@ -1747,9 +2108,18 @@
 
     // Check if inspection has any content
     if (!State.sections || State.sections.length === 0) {
-      if (emptyState) emptyState.style.display = 'flex';
-      if (canvasViewer) canvasViewer.style.display = 'none';
-      if (overlay) overlay.style.display = 'none';
+      if (emptyState) {
+        emptyState.style.display = 'flex';
+        emptyState.classList.remove('hidden');
+      }
+      if (canvasViewer) {
+        canvasViewer.style.display = 'none';
+        canvasViewer.classList.add('hidden');
+      }
+      if (overlay) {
+        overlay.style.display = 'none';
+        overlay.classList.add('hidden');
+      }
       if (statusTag) {
         statusTag.innerHTML = '<i data-lucide="info"></i><span>No Data</span>';
       }
@@ -1759,8 +2129,18 @@
 
     // If already generated and not dirty and not forced, reuse cached render
     if (!forceReload && !State.pdfDirty && State.cachedPdfBlobUrl && State.pdfDoc) {
-      if (emptyState) emptyState.style.display = 'none';
-      if (canvasViewer) canvasViewer.style.display = 'flex';
+      if (emptyState) {
+        emptyState.style.display = 'none';
+        emptyState.classList.add('hidden');
+      }
+      if (canvasViewer) {
+        canvasViewer.style.display = 'flex';
+        canvasViewer.classList.remove('hidden');
+      }
+      if (overlay) {
+        overlay.style.display = 'none';
+        overlay.classList.add('hidden');
+      }
       if (statusTag) {
         statusTag.innerHTML = '<i data-lucide="check-circle-2" style="color: var(--success, #10b981);"></i><span>Live & Synchronized</span>';
       }
@@ -1772,8 +2152,14 @@
     if (State.pdfIsGenerating) return;
     State.pdfIsGenerating = true;
 
-    if (emptyState) emptyState.style.display = 'none';
-    if (overlay) overlay.style.display = 'flex';
+    if (emptyState) {
+      emptyState.style.display = 'none';
+      emptyState.classList.add('hidden');
+    }
+    if (overlay) {
+      overlay.style.display = 'flex';
+      overlay.classList.remove('hidden');
+    }
     if (refreshBtn) refreshBtn.classList.add('is-refreshing');
     if (statusTag) {
       statusTag.innerHTML = '<i data-lucide="loader-2" class="spin"></i><span>Generating PDF...</span>';
@@ -1835,8 +2221,19 @@
         State.pdfDoc = pdfDoc;
         State.pdfTotalPages = pdfDoc.numPages;
 
-        if (canvasViewer) canvasViewer.style.display = 'flex';
+        if (emptyState) {
+          emptyState.style.display = 'none';
+          emptyState.classList.add('hidden');
+        }
+        if (canvasViewer) {
+          canvasViewer.style.display = 'flex';
+          canvasViewer.classList.remove('hidden');
+        }
         await renderPdfPage(1);
+        if (overlay) {
+          overlay.style.display = 'none';
+          overlay.classList.add('hidden');
+        }
 
         console.log(`[PDF Preview] Successfully loaded PDF (${pdfDoc.numPages} pages) and rendered page 1`);
       } else {
@@ -1851,7 +2248,18 @@
         }
         fallbackIframe.src = `${blobUrl}#toolbar=1&navpanes=1&view=FitH`;
         fallbackIframe.style.display = 'block';
-        if (canvasViewer) canvasViewer.style.display = 'none';
+        if (emptyState) {
+          emptyState.style.display = 'none';
+          emptyState.classList.add('hidden');
+        }
+        if (canvasViewer) {
+          canvasViewer.style.display = 'none';
+          canvasViewer.classList.add('hidden');
+        }
+        if (overlay) {
+          overlay.style.display = 'none';
+          overlay.classList.add('hidden');
+        }
         console.log('[PDF Preview] Rendered via fallback iframe');
       }
 
@@ -1860,15 +2268,24 @@
       }
     } catch (err) {
       console.error("PDF preview generation failed:", err);
-      if (emptyState) emptyState.style.display = 'flex';
-      if (canvasViewer) canvasViewer.style.display = 'none';
+      if (emptyState) {
+        emptyState.style.display = 'flex';
+        emptyState.classList.remove('hidden');
+      }
+      if (canvasViewer) {
+        canvasViewer.style.display = 'none';
+        canvasViewer.classList.add('hidden');
+      }
       if (statusTag) {
         statusTag.innerHTML = '<i data-lucide="alert-triangle" style="color: var(--danger, #ef4444);"></i><span>Preview Error</span>';
       }
       showToast("PDF Preview Error: " + err.message, "error");
     } finally {
       State.pdfIsGenerating = false;
-      if (overlay) overlay.style.display = 'none';
+      if (overlay) {
+        overlay.style.display = 'none';
+        overlay.classList.add('hidden');
+      }
       if (refreshBtn) refreshBtn.classList.remove('is-refreshing');
       if (window.lucide) lucide.createIcons();
     }
@@ -1883,6 +2300,66 @@
         window.open(State.cachedPdfBlobUrl, '_blank');
       }
     }
+  }
+
+  // Print entire vector PDF document (all pages)
+  async function printFullPdfReport() {
+    showToast("Preparing complete PDF report for printing...");
+    let blobUrl = State.cachedPdfBlobUrl;
+    if (!blobUrl || State.pdfDirty) {
+      await loadPdfPreview(true);
+      blobUrl = State.cachedPdfBlobUrl;
+    }
+    if (!blobUrl) {
+      showToast("Unable to generate PDF for printing", "error");
+      return;
+    }
+
+    let printed = false;
+    let printFrame = document.getElementById('pdfPrintFrame');
+    if (!printFrame) {
+      printFrame = document.createElement('iframe');
+      printFrame.id = 'pdfPrintFrame';
+      printFrame.style.position = 'fixed';
+      printFrame.style.top = '-9999px';
+      printFrame.style.left = '-9999px';
+      printFrame.style.width = '1px';
+      printFrame.style.height = '1px';
+      printFrame.style.border = 'none';
+      printFrame.style.opacity = '0';
+      printFrame.style.pointerEvents = 'none';
+      document.body.appendChild(printFrame);
+    }
+
+    printFrame.onload = function () {
+      setTimeout(() => {
+        try {
+          printFrame.contentWindow.focus();
+          printFrame.contentWindow.print();
+          printed = true;
+          showToast("Print dialog launched for full PDF report");
+        } catch (e) {
+          console.warn("Direct iframe PDF print blocked by browser sandbox/shield:", e);
+        }
+      }, 500);
+    };
+
+    printFrame.src = blobUrl;
+
+    // Browser security fallback (e.g. Brave Shields blocking PDF in iframe):
+    // If iframe print does not launch within 1.8 seconds, open full PDF in dedicated print window
+    setTimeout(() => {
+      if (!printed) {
+        const printWin = window.open(blobUrl, '_blank');
+        if (printWin) {
+          printWin.focus();
+          setTimeout(() => {
+            try { printWin.print(); } catch (_) {}
+          }, 1000);
+        }
+        showToast("Full PDF opened in print window (Press Ctrl+P to Print)");
+      }
+    }, 1800);
   }
 
   // Trigger PDF preview or flag dirty
@@ -1909,10 +2386,12 @@
       const it = sec?.items.find(i => i.id === itemId);
       if (it) {
         it.status = status;
+        State.isDirty = true;
         renderItems();
         updateMetrics();
         renderSidebar();
         renderReport();
+        saveActiveSession();
       }
     },
 
@@ -1921,7 +2400,9 @@
       const it = sec?.items.find(i => i.id === itemId);
       if (it) {
         it.comments = comments;
+        State.isDirty = true;
         renderReport();
+        debouncedSaveSession();
       }
     },
 
@@ -1939,8 +2420,10 @@
             dataUrl: e.target.result,
             caption: it.name
           });
+          State.isDirty = true;
           renderItems();
           renderReport();
+          saveActiveSession();
           showToast("Photo attached");
         }
       };
@@ -1971,8 +2454,10 @@
             State.clientInfo = json.data.clientInfo || {};
             State.sections = json.data.sections || [];
             State.activeSectionId = State.sections[0] ? State.sections[0].id : null;
+            State.isDirty = false;
             document.getElementById('savedReportsModal').style.display = 'none';
             setWorkspaceActive(true);
+            saveActiveSession();
             showToast(`Loaded ${State.fileName}`);
             return;
           }
@@ -2014,10 +2499,17 @@
                 const blob = await respPdf.blob();
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
+                a.style.display = 'none';
                 a.href = url;
                 a.download = pdfFilename;
+                document.body.appendChild(a);
                 a.click();
-                URL.revokeObjectURL(url);
+                setTimeout(() => {
+                  try {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                  } catch (_) {}
+                }, 60000);
                 showToast(`Downloaded ${pdfFilename}!`);
               } else {
                 showToast("Failed to generate PDF for saved report");
@@ -2034,11 +2526,20 @@
               const blob = await dlResp.blob();
               const url = URL.createObjectURL(blob);
               const a = document.createElement('a');
+              a.style.display = 'none';
               a.href = url;
               a.download = (json.data.fileName || 'Report').replace(/\.[^/.]+$/, "") + '.' + format;
+              document.body.appendChild(a);
               a.click();
-              URL.revokeObjectURL(url);
+              setTimeout(() => {
+                try {
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                } catch (_) {}
+              }, 60000);
               showToast(`Downloaded .${format}!`);
+            } else {
+              showToast(`Failed to export .${format} from server`);
             }
           }
         }
@@ -2114,9 +2615,11 @@
                 it.photos[0].caption = res.photoCaption;
               }
             }
+            State.isDirty = true;
             renderItems();
             updateMetrics();
             renderReport();
+            saveActiveSession();
             if (hasPhotos && !raw) {
               showToast("✨ AI inspected photo & filled observation narrative!");
             } else {
@@ -2545,8 +3048,19 @@
     syncFormToState();
     const overlay = document.getElementById('pdfGeneratingOverlay');
     const statusTxt = document.getElementById('pdfGeneratingStatus');
+    const submitBtn = document.getElementById('btnSubmitGeneratePdf');
+    const cancelBtn = document.getElementById('btnCancelExportPdf');
+
+    const originalBtnHtml = submitBtn ? submitBtn.innerHTML : '';
+
     if (overlay) overlay.style.display = 'flex';
     if (statusTxt) statusTxt.textContent = "Compiling report and formatting high-res photos...";
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner-sm" style="margin-right: 6px;"></span><span>Generating PDF...</span>';
+    }
+    if (cancelBtn) cancelBtn.disabled = true;
 
     const companyName = document.getElementById('pdfCompanyName')?.value.trim() || "N G Home Inspection Services";
     const inspectorName = document.getElementById('pdfInspectorName')?.value.trim() || "Nitin Gujarathi";
@@ -2600,6 +3114,12 @@
       alert("PDF Generation Failed: " + err.message);
     } finally {
       if (overlay) overlay.style.display = 'none';
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalBtnHtml;
+        if (window.lucide) lucide.createIcons();
+      }
+      if (cancelBtn) cancelBtn.disabled = false;
     }
   }
 
@@ -2609,10 +3129,39 @@
 
   // Fast Export for .hzf and .bin containers
   async function exportFile(format) {
-    showToast(`Generating .${format} download...`);
+    showToast(`Preparing .${format} package...`);
     syncFormToState();
     const cleanBase = (State.fileName || 'Inspection_Report').replace(/\.[^/.]+$/, "");
     const downloadName = `${cleanBase}.${format}`;
+
+    // Ensure all photo data is hydrated from IndexedDB if not already in memory
+    const missingPhotos = [];
+    for (const sec of (State.sections || [])) {
+      for (const it of (sec.items || [])) {
+        for (const p of (it.photos || [])) {
+          if (p.filename && !p.dataUrl) {
+            missingPhotos.push(p.filename);
+          }
+        }
+      }
+    }
+    if (missingPhotos.length > 0) {
+      try {
+        showToast(`Loading photos for .${format} package...`);
+        const photoMap = await idbGetPhotos(missingPhotos);
+        for (const sec of (State.sections || [])) {
+          for (const it of (sec.items || [])) {
+            for (const p of (it.photos || [])) {
+              if (p.filename && !p.dataUrl && photoMap[p.filename]) {
+                p.dataUrl = photoMap[p.filename];
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("Could not hydrate photos before export:", e);
+      }
+    }
 
     // Client-side instant zip packaging with STORE compression (no CPU freeze)
     if (window.JSZip) {
@@ -2637,7 +3186,7 @@
           squareFootage: 'squareFootage'
         };
         for (const [k, prop] of Object.entries(cMap)) {
-          if (State.clientInfo[k]) {
+          if (State.clientInfo && State.clientInfo[k]) {
             clientXml += `  <void property="${prop}"><string>${escapeXml(State.clientInfo[k])}</string></void>\n`;
           }
         }
@@ -2690,19 +3239,19 @@
 
               if (p.dataUrl && !writtenPhotos.has(cleanFname)) {
                 writtenPhotos.add(cleanFname);
-                if (p.dataUrl.includes(',')) {
-                  const base64Data = p.dataUrl.split(',')[1];
-                  zip.file(cleanFname, base64Data, { base64: true });
-                } else if (p.dataUrl.startsWith('blob:') || p.dataUrl.startsWith('http')) {
-                  try {
+                try {
+                  if (p.dataUrl.includes(',')) {
+                    const base64Data = p.dataUrl.split(',')[1];
+                    zip.file(cleanFname, base64Data, { base64: true });
+                  } else if (p.dataUrl.startsWith('blob:') || p.dataUrl.startsWith('http')) {
                     const imgResp = await fetch(p.dataUrl);
                     const imgBlob = await imgResp.blob();
                     zip.file(cleanFname, imgBlob);
-                  } catch (e) {
-                    console.warn("Failed to fetch photo blob:", e);
+                  } else {
+                    zip.file(cleanFname, p.dataUrl, { base64: true });
                   }
-                } else {
-                  zip.file(cleanFname, p.dataUrl, { base64: true });
+                } catch (photoErr) {
+                  console.warn(`Failed to package photo ${cleanFname}:`, photoErr);
                 }
               }
             }
@@ -2734,20 +3283,32 @@
         inspXml += `</Sections></InspectionReport>`;
         zip.file("InspectionData.xml", inspXml);
 
+        // 6. manifest.xml
+        let manifestXml = `<?xml version="1.0" encoding="UTF-8"?>\n<HZFManifest>\n  <Software>Home Inspector Pro Compatible Studio</Software>\n  <Version>2.0</Version>\n  <ExportDate>${new Date().toISOString()}</ExportDate>\n</HZFManifest>`;
+        zip.file("manifest.xml", manifestXml);
+
+        showToast(`Compiling .${format} archive (${writtenPhotos.size} photos)...`);
+
         // FAST GENERATE using STORE (instant packaging without heavy re-compression of JPEGs)
         const blob = await zip.generateAsync({
           type: "blob",
-          compression: "STORE"
+          compression: "STORE",
+          streamFiles: true
         });
 
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
+        a.style.display = 'none';
         a.href = url;
         a.download = downloadName;
         document.body.appendChild(a);
         a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        setTimeout(() => {
+          try {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          } catch (_) {}
+        }, 60000);
         showToast(`Downloaded ${downloadName}!`);
         return;
       } catch (err) {
@@ -2755,8 +3316,9 @@
       }
     }
 
-    // Backend export fallback if JSZip not available
+    // Backend export fallback if JSZip not available or failed
     try {
+      showToast(`Generating .${format} via server...`);
       const endpoint = (format === 'bin') ? '/api/export-bin' : '/api/export-hzf';
       const resp = await fetch(apiUrl(endpoint), {
         method: 'POST',
@@ -2768,25 +3330,64 @@
           sections: State.sections
         })
       });
-      if (resp.ok) {
-        const blob = await resp.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = downloadName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        showToast(`Downloaded ${downloadName}!`);
+      if (!resp.ok) {
+        const errJson = await resp.json().catch(() => ({}));
+        throw new Error(errJson.detail || `Server returned HTTP ${resp.status}`);
       }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = downloadName;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        } catch (_) {}
+      }, 60000);
+      showToast(`Downloaded ${downloadName}!`);
     } catch (e) {
       showToast("Download failed: " + e.message);
     }
   }
 
-  // DOM Event Listeners  // DOM Event Listeners
-  document.addEventListener('DOMContentLoaded', () => {
+  // DOM Event Listeners
+  document.addEventListener('DOMContentLoaded', async () => {
+
+    // Wire up Confirmation Leave Modal
+    const confirmModal = document.getElementById('confirmLeaveModal');
+    document.getElementById('btnCloseConfirmLeave')?.addEventListener('click', hideConfirmLeaveModal);
+    document.getElementById('btnStayInWorkspace')?.addEventListener('click', hideConfirmLeaveModal);
+    confirmModal?.addEventListener('click', (e) => {
+      if (e.target.id === 'confirmLeaveModal') hideConfirmLeaveModal();
+    });
+
+    document.getElementById('btnSaveAndLeave')?.addEventListener('click', async () => {
+      const btn = document.getElementById('btnSaveAndLeave');
+      const oldHtml = btn.innerHTML;
+      btn.innerHTML = `<span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;margin-right:6px;"></span> Saving to library...`;
+      btn.disabled = true;
+      try {
+        await saveActiveReport();
+        await clearActiveSession();
+        hideConfirmLeaveModal();
+        setWorkspaceActive(false, true);
+        showToast("Inspection saved to library. Returned to dashboard.");
+      } finally {
+        btn.innerHTML = oldHtml;
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById('btnDiscardAndLeave')?.addEventListener('click', async () => {
+      await clearActiveSession();
+      hideConfirmLeaveModal();
+      setWorkspaceActive(false, true);
+      showToast("Returned to dashboard.");
+    });
 
     // Listen to browser Back / Forward history navigation
     window.addEventListener('popstate', (e) => {
@@ -2796,17 +3397,16 @@
           setWorkspaceActive(true, false);
         }
       } else {
-        if (State.isInspectionActive) {
+        if (State.isInspectionActive && State.sections && State.sections.length > 0) {
+          try {
+            history.pushState({ view: 'workspace' }, '', '#workspace');
+          } catch (err) {}
+          showConfirmLeaveModal();
+        } else {
           setWorkspaceActive(false, false);
         }
       }
     });
-
-    // Initial state: Clean Welcome Screen (Zero Hardcoded Data)
-    if (window.location.hash === '#workspace') {
-      history.replaceState({ view: 'home' }, '', window.location.pathname + window.location.search);
-    }
-    setWorkspaceActive(false, false);
 
     // Dedicated Back Buttons
     const navBackBtn = document.getElementById('btnNavBack');
@@ -2823,6 +3423,97 @@
           goBackHome();
         }
       });
+    }
+
+    // Top toolbar Save button
+    document.getElementById('btnSaveInspection')?.addEventListener('click', saveActiveReport);
+
+    // Auto-save property form changes
+    document.getElementById('tabProperty')?.addEventListener('input', () => {
+      syncFormToState();
+    });
+
+    // Before unload listener to save sync
+    window.addEventListener('beforeunload', () => {
+      if (State.isInspectionActive) {
+        syncFormToState();
+        saveActiveSession();
+      }
+    });
+
+    // Restore active inspection session on page refresh (F5) or clean start
+    // Step 1: Instant synchronous restore from sessionStorage
+    let sessionRestored = false;
+    try {
+      const rawSession = sessionStorage.getItem('hzf_active_session_v4');
+      if (rawSession) {
+        const syncSession = JSON.parse(rawSession);
+        if (syncSession && syncSession.isInspectionActive && syncSession.sections && syncSession.sections.length > 0) {
+          State.fileName = syncSession.fileName || 'Untitled_Inspection.hzf';
+          State.activeReportId = syncSession.activeReportId || null;
+          State.clientInfo = syncSession.clientInfo || {};
+          State.sections = syncSession.sections || [];
+          State.activeSectionId = syncSession.activeSectionId || (State.sections[0] ? State.sections[0].id : null);
+          State.isDirty = !!syncSession.isDirty;
+          State.isInspectionActive = true;
+          State.activeTab = syncSession.activeTab || 'checklist';
+
+          // Set workspace active immediately
+          setWorkspaceActive(true, false);
+          if (window.location.hash !== '#workspace') {
+            history.replaceState({ view: 'workspace' }, '', '#workspace');
+          }
+
+          // Restore tab
+          const savedTab = syncSession.activeTab || 'checklist';
+          const tabBtn = document.querySelector(`.nav-tab[data-tab="${savedTab}"]`);
+          if (tabBtn) tabBtn.click();
+
+          sessionRestored = true;
+          showToast(`Workspace restored: ${State.fileName}`);
+        }
+      }
+    } catch (e) {
+      console.warn("Sync session restore error:", e);
+    }
+
+    // Step 2: Hydrate full photos and data from IndexedDB
+    try {
+      const fullSession = await getActiveSession();
+      if (fullSession && fullSession.isInspectionActive && fullSession.sections && fullSession.sections.length > 0) {
+        State.fileName = fullSession.fileName || State.fileName;
+        State.activeReportId = fullSession.activeReportId || State.activeReportId;
+        State.clientInfo = fullSession.clientInfo || State.clientInfo;
+        State.sections = fullSession.sections || State.sections;
+        State.activeSectionId = fullSession.activeSectionId || State.activeSectionId;
+        State.isDirty = !!fullSession.isDirty;
+        State.isInspectionActive = true;
+        State.activeTab = fullSession.activeTab || State.activeTab || 'checklist';
+
+        if (!sessionRestored) {
+          setWorkspaceActive(true, false);
+          if (window.location.hash !== '#workspace') {
+            history.replaceState({ view: 'workspace' }, '', '#workspace');
+          }
+          const savedTab = fullSession.activeTab || 'checklist';
+          const tabBtn = document.querySelector(`.nav-tab[data-tab="${savedTab}"]`);
+          if (tabBtn) tabBtn.click();
+          sessionRestored = true;
+          showToast(`Workspace restored: ${State.fileName}`);
+        } else {
+          renderAll();
+        }
+      }
+    } catch (e) {
+      console.warn("Async session restore error:", e);
+    }
+
+    if (!sessionRestored) {
+      // Clean start on Welcome Screen
+      if (window.location.hash === '#workspace') {
+        history.replaceState({ view: 'home' }, '', window.location.pathname + window.location.search);
+      }
+      setWorkspaceActive(false, false);
     }
 
     // Build New Inspection / Start Blank Inspection triggers
@@ -2903,6 +3594,7 @@
     document.getElementById('btnDownloadPdfTab')?.addEventListener('click', () => downloadPdfReport());
     document.getElementById('btnRefreshPdfPreview')?.addEventListener('click', () => loadPdfPreview(true));
     document.getElementById('btnOpenPdfNewTab')?.addEventListener('click', () => openPdfInNewTab());
+    document.getElementById('btnPrintPdfTab')?.addEventListener('click', () => printFullPdfReport());
     document.getElementById('btnPdfPrevPage')?.addEventListener('click', () => {
       if (State.pdfDoc && State.pdfCurrentPage > 1) {
         renderPdfPage(State.pdfCurrentPage - 1);
@@ -2979,10 +3671,12 @@
 
     const printRepBtn = document.getElementById('btnPrintReport');
     if (printRepBtn) {
-      printRepBtn.addEventListener('click', () => {
-        document.querySelector('.nav-tab[data-tab="report"]')?.click();
-        setTimeout(() => window.print(), 250);
-      });
+      printRepBtn.addEventListener('click', () => printFullPdfReport());
+    }
+
+    const printTabBtn = document.getElementById('btnPrintPdfTab');
+    if (printTabBtn) {
+      printTabBtn.addEventListener('click', () => printFullPdfReport());
     }
 
     const printPdfOld = document.getElementById('btnPrintPdf');
@@ -2998,11 +3692,16 @@
       });
     }
 
-    // Dismiss export dropdown when selecting an export action
+    // Dismiss export dropdown when selecting an export action or clicking outside
     document.querySelectorAll('#exportDropdownMenu .dropdown-item').forEach(item => {
       item.addEventListener('click', () => {
         if (exportContainer) exportContainer.classList.remove('open');
       });
+    });
+    document.addEventListener('click', (e) => {
+      if (exportContainer && !exportContainer.contains(e.target)) {
+        exportContainer.classList.remove('open');
+      }
     });
 
     // Mobile Navigation Drawer and Backdrop Handlers
@@ -3076,16 +3775,37 @@
     // Tabs Navigation
     document.querySelectorAll('.nav-tab').forEach(tab => {
       tab.addEventListener('click', () => {
-        document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
         const target = tab.getAttribute('data-tab');
+        State.activeTab = target;
+        saveActiveSession();
+        document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll(`.nav-tab[data-tab="${target}"]`).forEach(t => t.classList.add('active'));
+
+        const titleView = document.getElementById('titlebarCurrentView');
+        if (titleView) {
+          if (target === 'checklist') titleView.textContent = 'Checklist & Systems';
+          else if (target === 'property') titleView.textContent = 'Client Information';
+          else if (target === 'report') titleView.textContent = 'Report Preview';
+        }
 
         const tabC = document.getElementById('tabChecklist');
         const tabP = document.getElementById('tabProperty');
         const tabR = document.getElementById('tabReport');
-        if (tabC) tabC.style.display = (target === 'checklist') ? 'flex' : 'none';
-        if (tabP) tabP.style.display = (target === 'property') ? 'block' : 'none';
-        if (tabR) tabR.style.display = (target === 'report') ? 'block' : 'none';
+        if (tabC) {
+          tabC.style.display = (target === 'checklist') ? 'flex' : 'none';
+          tabC.classList.toggle('active-tab-panel', target === 'checklist');
+          tabC.classList.toggle('hidden-tab-panel', target !== 'checklist');
+        }
+        if (tabP) {
+          tabP.style.display = (target === 'property') ? 'block' : 'none';
+          tabP.classList.toggle('active-tab-panel', target === 'property');
+          tabP.classList.toggle('hidden-tab-panel', target !== 'property');
+        }
+        if (tabR) {
+          tabR.style.display = (target === 'report') ? 'block' : 'none';
+          tabR.classList.toggle('active-tab-panel', target === 'report');
+          tabR.classList.toggle('hidden-tab-panel', target !== 'report');
+        }
 
         if (target === 'report') {
           // Auto-generate preview if we have data but no cached PDF yet
@@ -3152,11 +3872,13 @@
           comments: comments,
           photos: []
         });
+        State.isDirty = true;
         addItemModal.style.display = 'none';
         renderItems();
         updateMetrics();
         renderSidebar();
         renderReport();
+        saveActiveSession();
         showToast(`Added ${name}`);
       }
     });
@@ -3189,10 +3911,12 @@
 
       State.sections.push(newSec);
       State.activeSectionId = newSec.id;
+      State.isDirty = true;
       addSectionModal.style.display = 'none';
       renderSidebar();
       renderItems();
       renderReport();
+      saveActiveSession();
       showToast(`Created section "${name}"`);
     });
 
@@ -3208,8 +3932,10 @@
       const it = sec?.items.find(i => i.id === itemId);
       if (it && it.photos[photoIdx]) {
         it.photos[photoIdx].caption = document.getElementById('photoModalCaption')?.value.trim() || '';
+        State.isDirty = true;
         renderItems();
         renderReport();
+        saveActiveSession();
         showToast("Caption updated");
       }
       if (photoModal) photoModal.style.display = 'none';
@@ -3222,8 +3948,10 @@
       const it = sec?.items.find(i => i.id === itemId);
       if (it && it.photos) {
         it.photos.splice(photoIdx, 1);
+        State.isDirty = true;
         renderItems();
         renderReport();
+        saveActiveSession();
         showToast("Photo deleted");
       }
       if (photoModal) photoModal.style.display = 'none';
@@ -3311,9 +4039,11 @@
       }
 
       batchModal.style.display = 'none';
+      State.isDirty = true;
       renderItems();
       updateMetrics();
       renderReport();
+      saveActiveSession();
       showToast(`🎉 Applied AI enhancements to ${count} items!`);
     });
 
@@ -3365,6 +4095,15 @@
       setCoverPhoto(null, 'default', 'Default Bundled Hero');
       document.querySelectorAll('.report-thumb-card').forEach(c => c.classList.remove('selected'));
       showToast("Reset cover photo to default hero");
+    });
+
+    const searchInput = document.getElementById('quickNarrativeSearch');
+    searchInput?.addEventListener('input', (e) => {
+      const q = e.target.value.toLowerCase().trim();
+      document.querySelectorAll('.clean-item-card').forEach(card => {
+        const text = card.textContent.toLowerCase();
+        card.style.display = (!q || text.includes(q)) ? 'block' : 'none';
+      });
     });
 
     if (window.lucide) lucide.createIcons();

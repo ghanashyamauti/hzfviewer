@@ -3,12 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HZF Studio | Home Inspection Builder & Editor</title>
+  <title>Home Inspector Pro - HZF Inspector Studio</title>
 
-  <!-- Typography: Plus Jakarta Sans -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <!-- Typography: Classic Windows Desktop System Fonts (Segoe UI, Tahoma, Arial) -->
 
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -30,134 +27,70 @@
     }
   </script>
 
-  <link rel="stylesheet" href="styles.css?v=218">
+  <link rel="stylesheet" href="styles.css?v=hip-print-pdf-v1">
 </head>
-<body>
-  <div class="app-shell">
+<body class="classic-desktop-body">
+  <div class="app-shell classic-window">
 
-    <!-- Top Navigation Bar -->
-    <header class="top-nav">
-      <div class="nav-brand-group">
-        <!-- Back Arrow Button (Visible during active workspace) -->
-        <button class="btn btn-outline btn-sm nav-back-btn" id="btnNavBack" style="display: none;" title="Back to Dashboard">
-          <i data-lucide="arrow-left"></i>
-          <span class="btn-text">Back</span>
-        </button>
-
-        <div class="nav-brand" id="brandHomeBtn" title="Back to Home Dashboard">
-          <div class="brand-icon">
-            <i data-lucide="shield-check"></i>
-          </div>
-          <div class="brand-info">
-            <span class="brand-title">HZF Studio</span>
-            <span class="brand-subtitle">Inspection Builder</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Center Tabs (Visible during active inspection) -->
-      <div class="nav-center-tabs" id="navCenterTabs" style="display: none;">
-        <button class="nav-tab active" data-tab="checklist">
-          <i data-lucide="check-circle-2"></i>
-          <span class="tab-label-full">Checklist</span>
-          <span class="tab-label-short">Checklist</span>
-        </button>
-        <button class="nav-tab" data-tab="property">
-          <i data-lucide="home"></i>
-          <span class="tab-label-full">Property Info</span>
-          <span class="tab-label-short">Property</span>
-        </button>
-        <button class="nav-tab" data-tab="report">
-          <i data-lucide="file-text"></i>
-          <span class="tab-label-full">Report Preview</span>
-          <span class="tab-label-short">Report</span>
-        </button>
-      </div>
-
-      <!-- Right Header Actions -->
-      <div class="nav-actions">
+    <!-- DESKTOP TOOLBAR RIBBON (ICON OVER TEXT) -->
+    <header class="toolbar-ribbon">
+      <div class="toolbar-scroll-wrap">
         <input type="file" id="fileUploadInput" accept=".hzf,.bin,.zip" style="display: none;">
-        
-        <button class="btn btn-outline" id="btnAiSettings" title="Configure Gemini AI Reviewer">
-          <i data-lucide="sparkles" style="color: #6366f1;"></i>
-          <span class="btn-text">AI Assistant</span>
-          <span class="ai-status-indicator" id="aiStatusDot" title="AI Status"></span>
-        </button>
 
-        <button class="btn btn-outline" id="btnOpenSavedReports" title="View previously saved reports">
-          <i data-lucide="archive"></i>
-          <span class="btn-text">Saved Reports</span>
-          <span class="badge-count" id="savedReportsCountBadge">0</span>
-        </button>
-
-        <button class="btn btn-outline btn-secondary-action" id="btnOpenExisting" title="Open .hzf or .bin file">
-          <i data-lucide="folder-open"></i>
-          <span class="btn-text">Open File</span>
-        </button>
-
-        <button class="btn btn-outline btn-secondary-action" id="btnStartNewInspection" title="Start blank inspection">
-          <i data-lucide="plus-circle"></i>
-          <span class="btn-text">New Inspection</span>
-        </button>
-
-        <!-- Save & Export Actions (Visible in active workspace) -->
-        <div class="export-dropdown-wrap" id="exportGroup" style="display: none;">
-          <button class="btn btn-primary" id="btnSaveToLibrary" title="Save report to library">
-            <i data-lucide="save"></i>
-            <span class="btn-text">Save</span>
-          </button>
-          
-          <div class="export-menu-container" id="exportMenuContainer">
-            <button class="btn btn-outline btn-export-trigger" id="btnExportTrigger" title="Download report or files" type="button">
-              <i data-lucide="download"></i>
-              <span class="btn-text">Export</span>
-              <i data-lucide="chevron-down" class="chevron-icon" style="width: 14px; height: 14px;"></i>
-            </button>
-            <div class="export-dropdown-menu" id="exportDropdownMenu">
-              <button type="button" class="dropdown-item" id="btnSavePdf" title="Download exact visual PDF report">
-                <i data-lucide="file-text" style="color: #dc2626;"></i>
-                <div class="dropdown-item-info">
-                  <div class="dropdown-item-title">Download PDF</div>
-                  <div class="dropdown-item-sub">Exact Visual Report PDF</div>
-                </div>
-              </button>
-              <button type="button" class="dropdown-item" id="btnSaveHzf" title="Download as .hzf archive">
-                <i data-lucide="package" style="color: #2563eb;"></i>
-                <div class="dropdown-item-info">
-                  <div class="dropdown-item-title">Download .hzf</div>
-                  <div class="dropdown-item-sub">Home Inspector Pro Archive</div>
-                </div>
-              </button>
-              <button type="button" class="dropdown-item" id="btnSaveBin" title="Download as .bin container">
-                <i data-lucide="file-archive" style="color: #059669;"></i>
-                <div class="dropdown-item-info">
-                  <div class="dropdown-item-title">Download .bin</div>
-                  <div class="dropdown-item-sub">HIP Binary Container</div>
-                </div>
-              </button>
-              <button type="button" class="dropdown-item" id="btnPrintReport" title="Print to Paper">
-                <i data-lucide="printer" style="color: #64748b;"></i>
-                <div class="dropdown-item-info">
-                  <div class="dropdown-item-title">Print Report</div>
-                  <div class="dropdown-item-sub">Browser / Paper Print</div>
-                </div>
-              </button>
-            </div>
-          </div>
+        <!-- Brand / Home Button -->
+        <div class="toolbar-brand" id="brandHomeBtn" title="Back to Home Dashboard" style="cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 4px 8px; margin-right: 4px;">
+          <i data-lucide="shield-check" style="color: #0b5ed7; width: 22px; height: 22px;"></i>
+          <span style="font-weight: 700; font-size: 13px; color: #111;">HIP Studio</span>
         </div>
 
-        <button class="btn btn-icon" id="btnThemeToggle" title="Toggle Theme">
-          <i data-lucide="moon" id="themeIcon"></i>
+        <div class="toolbar-divider"></div>
+
+        <!-- Open File -->
+        <button class="toolbar-btn" id="btnOpenExisting" title="Open .hzf or .bin inspection file">
+          <i data-lucide="folder-open" style="color: #eab308;"></i>
+          <span class="toolbar-btn-text">Open Inspection</span>
         </button>
 
-        <!-- Mobile More Menu Trigger -->
-        <button class="btn btn-icon btn-nav-more" id="btnNavMore" title="More Options">
-          <i data-lucide="more-vertical"></i>
+        <!-- New Inspection -->
+        <button class="toolbar-btn" id="btnStartNewInspection" title="Start blank inspection">
+          <i data-lucide="plus-circle" style="color: #059669;"></i>
+          <span class="toolbar-btn-text">New Inspection</span>
         </button>
+
+        <!-- Saved Reports -->
+        <button class="toolbar-btn" id="btnOpenSavedReports" title="View previously saved reports">
+          <div class="toolbar-badge-wrap">
+            <i data-lucide="archive" style="color: #7c3aed;"></i>
+            <span class="badge-count" id="savedReportsCountBadge">0</span>
+          </div>
+          <span class="toolbar-btn-text">Saved Reports</span>
+        </button>
+
+        <!-- Hidden elements for app.js backwards compatibility -->
+        <button class="toolbar-btn nav-back-btn" id="btnNavBack" style="display: none;"></button>
+        <button id="btnThemeToggle" style="display: none;"></button>
+        <i data-lucide="moon" id="themeIcon" style="display: none;"></i>
+        <button class="btn btn-icon btn-nav-more" id="btnNavMore" style="display: none;"></button>
       </div>
     </header>
 
-    <!-- Mobile Nav Drawer Menu -->
+    <!-- 4. NOTEBOOK TABS BAR (When inside active inspection) -->
+    <div class="notebook-tabs-bar" id="navCenterTabs" style="display: none;">
+      <button class="notebook-tab nav-tab active" data-tab="checklist">
+        <i data-lucide="check-square"></i>
+        <span>Checklist & Systems</span>
+      </button>
+      <button class="notebook-tab nav-tab" data-tab="property">
+        <i data-lucide="home"></i>
+        <span>Client & Property Information</span>
+      </button>
+      <button class="notebook-tab nav-tab" data-tab="report">
+        <i data-lucide="file-text"></i>
+        <span>Generate / Preview Report</span>
+      </button>
+    </div>
+
+    <!-- Mobile Nav Drawer Menu (Retained for touch / small screens) -->
     <div class="mobile-nav-drawer" id="mobileNavDrawer" style="display: none;">
       <div class="drawer-header">
         <span>Tools & Options</span>
@@ -198,11 +131,9 @@
         </button>
       </div>
     </div>
-
-    <!-- Mobile Nav Backdrop Overlay -->
     <div class="mobile-nav-backdrop" id="mobileNavBackdrop" style="display: none;"></div>
 
-    <!-- STATE 1: WELCOME SCREEN (ZERO HARDCODED DATA) -->
+    <!-- STATE 1: WELCOME SCREEN (CLASSIC WIZARD / DIALOG) -->
     <section class="welcome-screen" id="welcomeScreen">
       <div class="welcome-card">
         <div class="welcome-badge">HOME INSPECTOR PRO COMPATIBLE</div>
@@ -212,45 +143,35 @@
           Import phone photos, customize items, and save as <strong>.hzf</strong>, <strong>.bin</strong>, or <strong>PDF</strong>.
         </p>
 
-        <div class="welcome-actions-grid">
+        <div class="welcome-actions-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));">
           
           <!-- Open File Card -->
-          <div class="action-card" id="dropZoneCard">
+          <div class="action-card" id="dropZoneCard" style="cursor: pointer;">
             <div class="action-icon">
-              <i data-lucide="file-up"></i>
+              <i data-lucide="file-up" style="width: 32px; height: 32px;"></i>
             </div>
             <h3>Open Existing File</h3>
             <p>Drag & drop your <strong>.hzf</strong> or <strong>.bin</strong> file here, or click to browse.</p>
-            <button class="btn btn-primary btn-sm" id="btnBrowseFile">Select .hzf / .bin</button>
+            <button class="hip-btn btn-sm" id="btnBrowseFile">Select .hzf / .bin</button>
           </div>
 
           <!-- Build New Card -->
-          <div class="action-card" id="newInspectionCard">
+          <div class="action-card" id="newInspectionCard" style="cursor: pointer;">
             <div class="action-icon">
-              <i data-lucide="camera"></i>
+              <i data-lucide="camera" style="width: 32px; height: 32px;"></i>
             </div>
             <h3>Build New Inspection</h3>
             <p>Start fresh from photos & notes taken on your mobile phone.</p>
-            <button class="btn btn-accent btn-sm" id="btnCreateBlank">Start Blank Inspection</button>
-          </div>
-
-          <!-- Saved Reports Library Card -->
-          <div class="action-card" id="welcomeSavedReportsCard" style="cursor: pointer;">
-            <div class="action-icon" style="color: var(--accent);">
-              <i data-lucide="archive"></i>
-            </div>
-            <h3>Saved Reports Library</h3>
-            <p>Access, edit, and download previously saved inspection reports.</p>
-            <button class="btn btn-outline btn-sm" id="btnWelcomeOpenSaved">Open Saved Reports (<span id="welcomeSavedCount">0</span>)</button>
+            <button class="hip-btn btn-sm" id="btnCreateBlank">Start Blank Inspection</button>
           </div>
 
         </div>
 
         <div class="welcome-footer-hint">
-          <span>⚡ Direct .hzf & .bin compatibility</span>
-          <span>📱 Mobile photo workflow</span>
-          <span>📄 Client PDF reports</span>
-          <span>🔒 100% Offline & Private</span>
+          <span>Direct .hzf &amp; .bin compatibility</span>
+          <span>Mobile photo workflow</span>
+          <span>Client PDF reports</span>
+          <span>100% Offline &amp; Private</span>
         </div>
       </div>
     </section>
@@ -266,34 +187,87 @@
               <i data-lucide="arrow-left" style="width: 14px; height: 14px;"></i>
               <span>Back to Dashboard</span>
             </button>
-            <div class="file-pill" id="activeFilePill">Untitled_Inspection.hzf</div>
-            <h1 class="property-title" id="heroPropertyAddress">Inspection Property</h1>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="file-pill" id="activeFilePill" style="display: inline-block; padding: 2px 6px; background: #e8f0fe; color: #1a73e8; border: 1px solid #b8d4fe; border-radius: 2px; font-size: 11px; font-weight: 600;">Untitled_Inspection.hzf</span>
+              <h1 class="property-title" id="heroPropertyAddress">Inspection Property</h1>
+            </div>
             <p class="property-meta" id="heroPropertyMeta">
               Client: <strong id="metaClientName">—</strong> • Inspector: <strong id="metaInspectorName">—</strong> • Date: <strong id="metaDate">—</strong>
             </p>
           </div>
 
-          <!-- Defect Counters -->
-          <div class="hero-metrics">
-            <div class="metric-chip chip-hazard" title="Safety Hazards">
-              <span class="metric-count" id="countHazard">0</span>
-              <span class="metric-label">Hazard</span>
+          <!-- Right side: Defect Counters & Workspace Core Actions (Save & Export) -->
+          <div class="hero-right-side" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <!-- Defect Counters (Classic Desktop Matrix Counters) -->
+            <div class="hero-metrics">
+              <div class="metric-chip chip-hazard" title="Safety Hazards">
+                <span class="metric-label">Hazard:</span>
+                <span class="metric-count" id="countHazard">0</span>
+              </div>
+              <div class="metric-chip chip-defect" title="Defective Items">
+                <span class="metric-label">Defects:</span>
+                <span class="metric-count" id="countDefect">0</span>
+              </div>
+              <div class="metric-chip chip-marginal" title="Marginal Items">
+                <span class="metric-label">Marginal:</span>
+                <span class="metric-count" id="countMarginal">0</span>
+              </div>
+              <div class="metric-chip chip-good" title="Satisfactory Items">
+                <span class="metric-label">Good:</span>
+                <span class="metric-count" id="countGood">0</span>
+              </div>
+              <div class="metric-chip chip-qa" id="chipQaScore" style="cursor: pointer;" title="Click to view QA Compliance Audit">
+                <span class="metric-label">QA Score:</span>
+                <span class="metric-count" id="countQaScore">—</span>
+              </div>
             </div>
-            <div class="metric-chip chip-defect" title="Defective Items">
-              <span class="metric-count" id="countDefect">0</span>
-              <span class="metric-label">Defects</span>
-            </div>
-            <div class="metric-chip chip-marginal" title="Marginal Items">
-              <span class="metric-count" id="countMarginal">0</span>
-              <span class="metric-label">Marginal</span>
-            </div>
-            <div class="metric-chip chip-good" title="Satisfactory Items">
-              <span class="metric-count" id="countGood">0</span>
-              <span class="metric-label">Good</span>
-            </div>
-            <div class="metric-chip chip-qa" id="chipQaScore" style="cursor: pointer;" title="Click to view QA Compliance Audit">
-              <span class="metric-count" id="countQaScore">—</span>
-              <span class="metric-label">QA Score</span>
+
+            <!-- Workspace Actions: Save & Export -->
+            <div class="hero-actions" style="display: flex; align-items: center; gap: 6px;">
+              <button class="hip-btn hip-btn-primary" id="btnSaveToLibrary" title="Save inspection file to library">
+                <i data-lucide="save" style="width: 14px; height: 14px; color: #2563eb;"></i>
+                <span>Save</span>
+              </button>
+
+              <div class="export-dropdown-wrap" id="exportGroup">
+                <div class="export-menu-container" id="exportMenuContainer">
+                  <button class="hip-btn btn-export-trigger" id="btnExportTrigger" title="Download report or files" type="button">
+                    <i data-lucide="download" style="width: 14px; height: 14px; color: #059669;"></i>
+                    <span>Export</span>
+                    <i data-lucide="chevron-down" style="width: 12px; height: 12px;"></i>
+                  </button>
+                  <div class="export-dropdown-menu" id="exportDropdownMenu">
+                    <button type="button" class="dropdown-item" id="btnSavePdf" title="Download exact visual PDF report">
+                      <i data-lucide="file-text" style="color: #dc2626;"></i>
+                      <div class="dropdown-item-info">
+                        <div class="dropdown-item-title">Download PDF</div>
+                        <div class="dropdown-item-sub">Exact Visual Report PDF</div>
+                      </div>
+                    </button>
+                    <button type="button" class="dropdown-item" id="btnSaveHzf" title="Download as .hzf archive">
+                      <i data-lucide="package" style="color: #2563eb;"></i>
+                      <div class="dropdown-item-info">
+                        <div class="dropdown-item-title">Download .hzf</div>
+                        <div class="dropdown-item-sub">Home Inspector Pro Archive</div>
+                      </div>
+                    </button>
+                    <button type="button" class="dropdown-item" id="btnSaveBin" title="Download as .bin container">
+                      <i data-lucide="file-archive" style="color: #059669;"></i>
+                      <div class="dropdown-item-info">
+                        <div class="dropdown-item-title">Download .bin</div>
+                        <div class="dropdown-item-sub">HIP Binary Container</div>
+                      </div>
+                    </button>
+                    <button type="button" class="dropdown-item" id="btnPrintReport" title="Print Entire PDF Document">
+                      <i data-lucide="printer" style="color: #64748b;"></i>
+                      <div class="dropdown-item-info">
+                        <div class="dropdown-item-title">Print Report</div>
+                        <div class="dropdown-item-sub">Full Multi-Page Vector PDF</div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -302,17 +276,22 @@
       <!-- Automation Action Bar for In-House Reviewers -->
       <div class="automation-bar" id="automationBar">
         <div class="automation-bar-actions">
-          <button class="btn btn-sm btn-primary" id="btnRunBatchPolish" title="Auto-enhance all field notes using Gemini AI">
-            <i data-lucide="sparkles"></i>
+          <button class="hip-btn" id="btnRunBatchPolish" title="Auto-enhance all field notes using Gemini AI">
+            <i data-lucide="sparkles" style="width: 13px; height: 13px; color: #8b5cf6;"></i>
             <span>Auto-Polish All Narratives (AI)</span>
           </button>
-          <button class="btn btn-sm btn-outline" id="btnRunQaAudit" title="Run rule-based QA compliance audit">
-            <i data-lucide="shield-check"></i>
-            <span>Audit Report (QA)</span>
+          <button class="hip-btn" id="btnRunQaAudit" title="Run rule-based QA compliance audit">
+            <i data-lucide="shield-check" style="width: 13px; height: 13px; color: #0284c7;"></i>
+            <span>QA Audit</span>
           </button>
-          <button class="btn btn-sm btn-outline" id="btnGenerateAiSummary" title="Generate Executive Defect Summary">
-            <i data-lucide="file-check-2"></i>
+          <button class="hip-btn" id="btnGenerateAiSummary" title="Generate Executive Defect Summary">
+            <i data-lucide="file-check-2" style="width: 13px; height: 13px; color: #10b981;"></i>
             <span>Executive Summary</span>
+          </button>
+          <button class="hip-btn" id="btnAiSettings" title="Configure Gemini AI Assistant">
+            <i data-lucide="settings" style="width: 13px; height: 13px; color: #6366f1;"></i>
+            <span>AI Assistant</span>
+            <span class="ai-status-indicator" id="aiStatusDot" title="AI Status" style="position: static; margin-left: 4px; display: inline-block;"></span>
           </button>
         </div>
         <div class="automation-bar-status" id="automationStatusText">
@@ -326,7 +305,7 @@
         <!-- TAB 1: Checklist & Systems -->
         <div class="tab-panel active" id="tabChecklist">
           
-          <!-- Left Systems Sidebar -->
+          <!-- Left Systems Sidebar (Classic Explorer ListBox) -->
           <aside class="categories-sidebar">
             <div class="sidebar-head">
               <span>SYSTEMS & ROOMS</span>
@@ -345,8 +324,8 @@
                 <p class="active-section-desc" id="activeSectionDesc">Checklist findings and observations.</p>
               </div>
               <div class="header-btns">
-                <button class="btn btn-outline btn-sm" id="btnOpenAddItemModal">
-                  <i data-lucide="plus"></i>
+                <button class="hip-btn" id="btnOpenAddItemModal">
+                  <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
                   <span>Add Item</span>
                 </button>
               </div>
@@ -359,94 +338,59 @@
 
         </div>
 
-        <!-- TAB 2: Property & Client Details -->
+        <!-- TAB 2: Property & Client Details (HIP Desktop Style from Reference Screenshot) -->
         <div class="tab-panel" id="tabProperty" style="display: none;">
-          <div class="clean-form-container">
-            <div class="form-header">
-              <h2>Property & Client Information</h2>
-              <p>Values saved inside ClientInfo.xml in the .hzf / .bin file.</p>
-            </div>
-
-            <div class="clean-form-grid">
-              
-              <!-- Property Details -->
-              <div class="form-card">
-                <h3>Inspection Property</h3>
-                <div class="form-fields">
-                  <div class="form-field full">
-                    <label for="formAddress">Property Address</label>
-                    <input type="text" id="formAddress" class="input-clean" placeholder="e.g. 123 Maple Avenue, Springfield">
-                  </div>
-                  <div class="form-field">
-                    <label for="formPropertyType">Building Type</label>
-                    <input type="text" id="formPropertyType" class="input-clean" placeholder="e.g. Single Family Residential">
-                  </div>
-                  <div class="form-field">
-                    <label for="formYearBuilt">Year Built</label>
-                    <input type="text" id="formYearBuilt" class="input-clean" placeholder="e.g. 1998">
-                  </div>
-                  <div class="form-field">
-                    <label for="formSqFt">Square Footage</label>
-                    <input type="text" id="formSqFt" class="input-clean" placeholder="e.g. 2,400 sq ft">
-                  </div>
-                  <div class="form-field">
-                    <label for="formWeather">Weather Conditions</label>
-                    <input type="text" id="formWeather" class="input-clean" placeholder="e.g. Clear, 72°F">
-                  </div>
-                </div>
-              </div>
-
-              <!-- Client Details -->
-              <div class="form-card">
-                <h3>Client Details</h3>
-                <div class="form-fields">
-                  <div class="form-field full">
-                    <label for="formClientName">Client Full Name</label>
-                    <input type="text" id="formClientName" class="input-clean" placeholder="e.g. John Doe">
-                  </div>
-                  <div class="form-field">
-                    <label for="formClientPhone">Phone Number</label>
-                    <input type="text" id="formClientPhone" class="input-clean" placeholder="e.g. (555) 123-4567">
-                  </div>
-                  <div class="form-field">
-                    <label for="formClientEmail">Email Address</label>
-                    <input type="email" id="formClientEmail" class="input-clean" placeholder="e.g. client@example.com">
-                  </div>
-                  <div class="form-field">
-                    <label for="formInspectionDate">Inspection Date</label>
-                    <input type="date" id="formInspectionDate" class="input-clean">
-                  </div>
-                  <div class="form-field">
-                    <label for="formInspectionTime">Inspection Time</label>
-                    <input type="text" id="formInspectionTime" class="input-clean" placeholder="e.g. 09:30 AM">
-                  </div>
-                </div>
-              </div>
-
-              <!-- Inspector & Company Profile -->
-              <div class="form-card full-width">
-                <h3>Inspector & Company Profile</h3>
-                <div class="form-fields three-col">
-                  <div class="form-field">
-                    <label for="formInspectorName">Inspector Name</label>
-                    <input type="text" id="formInspectorName" class="input-clean" placeholder="e.g. Jane Inspector">
-                  </div>
-                  <div class="form-field">
-                    <label for="formInspectorLicense">License / Certification</label>
-                    <input type="text" id="formInspectorLicense" class="input-clean" placeholder="e.g. State Lic #12345 / InterNACHI">
-                  </div>
-                  <div class="form-field">
-                    <label for="formCompanyName">Inspection Company</label>
-                    <input type="text" id="formCompanyName" class="input-clean" placeholder="e.g. Precision Home Inspections">
-                  </div>
-                </div>
-              </div>
-
-            </div>
-
-            <div class="form-actions">
-              <button class="btn btn-primary" id="btnSavePropertyForm">Save Information</button>
-            </div>
+          <div class="hip-form-container">
+            <div class="hip-form-title">Client Information</div>
+            
+            <table class="hip-form-table">
+              <tr>
+                <td class="hip-lbl"><label for="formClientName">Client Name</label></td>
+                <td class="hip-val"><input type="text" id="formClientName" class="hip-input" placeholder="e.g. Mr. Manish Shah"></td>
+                <td class="hip-lbl"><label for="formClientPhone">Phone Number</label></td>
+                <td class="hip-val"><input type="text" id="formClientPhone" class="hip-input" placeholder="e.g. (555) 123-4567"></td>
+              </tr>
+              <tr>
+                <td class="hip-lbl"><label for="formClientEmail">Email Address</label></td>
+                <td class="hip-val" colspan="3"><input type="email" id="formClientEmail" class="hip-input" placeholder="e.g. client@example.com"></td>
+              </tr>
+              <tr>
+                <td class="hip-lbl"><label for="formAddress">Inspection Address</label></td>
+                <td class="hip-val" colspan="3"><input type="text" id="formAddress" class="hip-input" placeholder="e.g. Flat no.A2-403, Kumar Prerna, Nagrus Road"></td>
+              </tr>
+              <tr>
+                <td class="hip-lbl"><label for="formPropertyType">Building / Property Type</label></td>
+                <td class="hip-val"><input type="text" id="formPropertyType" class="hip-input" placeholder="e.g. Single Family Residential"></td>
+                <td class="hip-lbl"><label for="formWeather">Weather</label></td>
+                <td class="hip-val"><input type="text" id="formWeather" class="hip-input" placeholder="e.g. Sunny"></td>
+              </tr>
+              <tr>
+                <td class="hip-lbl"><label for="formInspectionDate">Date of Inspection</label></td>
+                <td class="hip-val"><input type="date" id="formInspectionDate" class="hip-input"></td>
+                <td class="hip-lbl"><label for="formInspectionTime">Time</label></td>
+                <td class="hip-val"><input type="text" id="formInspectionTime" class="hip-input" placeholder="e.g. 11:00 AM"></td>
+              </tr>
+              <tr>
+                <td class="hip-lbl"><label for="formYearBuilt">Age of Home (Year Built)</label></td>
+                <td class="hip-val"><input type="text" id="formYearBuilt" class="hip-input" placeholder="e.g. 1998"></td>
+                <td class="hip-lbl"><label for="formSqFt">Size (Square Footage)</label></td>
+                <td class="hip-val"><input type="text" id="formSqFt" class="hip-input" placeholder="e.g. 2,400 sq ft"></td>
+              </tr>
+              <tr>
+                <td class="hip-lbl"><label for="formInspectorName">Inspector Name</label></td>
+                <td class="hip-val"><input type="text" id="formInspectorName" class="hip-input" placeholder="e.g. Jane Inspector"></td>
+                <td class="hip-lbl"><label for="formCompanyName">Inspection Company</label></td>
+                <td class="hip-val"><input type="text" id="formCompanyName" class="hip-input" placeholder="e.g. Precision Home Inspections"></td>
+              </tr>
+              <tr>
+                <td class="hip-lbl"><label for="formInspectorLicense">License / Certification</label></td>
+                <td class="hip-val"><input type="text" id="formInspectorLicense" class="hip-input" placeholder="e.g. State Lic #12345 / InterNACHI"></td>
+                <td class="hip-lbl"></td>
+                <td class="hip-val" style="text-align: right;">
+                  <button class="hip-btn hip-btn-primary" id="btnSavePropertyForm">Save Information</button>
+                </td>
+              </tr>
+            </table>
           </div>
         </div>
 
@@ -465,25 +409,29 @@
                 </span>
               </div>
               <div class="pdf-toolbar-right">
-                <button class="btn btn-outline btn-sm" id="btnRefreshPdfPreview" title="Recompile preview with current inspection data">
-                  <i data-lucide="refresh-cw"></i>
+                <button class="hip-btn" id="btnRefreshPdfPreview" title="Recompile preview with current inspection data">
+                  <i data-lucide="refresh-cw" style="width: 14px; height: 14px;"></i>
                   <span>Refresh Preview</span>
                 </button>
-                <button class="btn btn-outline btn-sm" id="btnOpenPdfNewTab" title="Open full vector PDF in browser window">
-                  <i data-lucide="external-link"></i>
+                <button class="hip-btn" id="btnOpenPdfNewTab" title="Open full vector PDF in browser window">
+                  <i data-lucide="external-link" style="width: 14px; height: 14px;"></i>
                   <span>Open in New Tab</span>
                 </button>
-                <button class="btn btn-primary btn-sm" id="btnDownloadPdfTab" title="Configure options and download PDF document">
-                  <i data-lucide="download"></i>
+                <button class="hip-btn" id="btnPrintPdfTab" title="Print full multi-page PDF document">
+                  <i data-lucide="printer" style="width: 14px; height: 14px;"></i>
+                  <span>Print PDF</span>
+                </button>
+                <button class="hip-btn hip-btn-primary" id="btnDownloadPdfTab" title="Configure options and download PDF document">
+                  <i data-lucide="download" style="width: 14px; height: 14px;"></i>
                   <span>Download PDF</span>
                 </button>
               </div>
             </div>
 
             <!-- PDF Viewer Stage -->
-            <div class="pdf-viewer-stage" id="pdfViewerStage" style="width: 100%; height: calc(100vh - 180px); min-height: 500px; position: relative; background: #323639; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column;">
+            <div class="pdf-viewer-stage" id="pdfViewerStage">
               <!-- Loading Overlay -->
-              <div class="pdf-loading-overlay" id="pdfLoadingOverlay" style="display: none;">
+              <div class="pdf-loading-overlay hidden" id="pdfLoadingOverlay" style="display: none;">
                 <div class="pdf-loading-card">
                   <div class="pdf-loading-spinner"></div>
                   <h4 class="pdf-loading-title">Generating Exact PDF Preview</h4>
@@ -498,30 +446,30 @@
               <div id="pdfCanvasViewer" class="pdf-canvas-viewer" style="display: none;">
                 <div class="pdf-page-nav">
                   <div class="pdf-nav-group">
-                    <button class="btn btn-ghost btn-sm" id="btnPdfPrevPage" title="Previous Page (Left Arrow)">
-                      <i data-lucide="chevron-left"></i>
+                    <button class="win-control-btn" id="btnPdfPrevPage" title="Previous Page (Left Arrow)">
+                      <i data-lucide="chevron-left" style="width: 14px; height: 14px;"></i>
                     </button>
                     <span class="pdf-page-indicator" id="pdfPageIndicator" title="Click to jump to any page">Page 1 / 1</span>
-                    <button class="btn btn-ghost btn-sm" id="btnPdfNextPage" title="Next Page (Right Arrow)">
-                      <i data-lucide="chevron-right"></i>
+                    <button class="win-control-btn" id="btnPdfNextPage" title="Next Page (Right Arrow)">
+                      <i data-lucide="chevron-right" style="width: 14px; height: 14px;"></i>
                     </button>
                   </div>
                   <div class="pdf-nav-divider"></div>
                   <div class="pdf-zoom-group">
-                    <button class="btn btn-ghost btn-sm active" id="btnPdfFitPage" title="Fit Whole Page to Screen">
-                      <i data-lucide="maximize-2"></i>
+                    <button class="hip-btn active" id="btnPdfFitPage" title="Fit Whole Page to Screen">
+                      <i data-lucide="maximize-2" style="width: 13px; height: 13px;"></i>
                       <span>Fit Page</span>
                     </button>
-                    <button class="btn btn-ghost btn-sm" id="btnPdfFitWidth" title="Fit Page to Width">
-                      <i data-lucide="move-horizontal"></i>
+                    <button class="hip-btn" id="btnPdfFitWidth" title="Fit Page to Width">
+                      <i data-lucide="move-horizontal" style="width: 13px; height: 13px;"></i>
                       <span>Fit Width</span>
                     </button>
-                    <button class="btn btn-ghost btn-sm" id="btnPdfZoomOut" title="Zoom Out">
-                      <i data-lucide="minus"></i>
+                    <button class="win-control-btn" id="btnPdfZoomOut" title="Zoom Out">
+                      <i data-lucide="minus" style="width: 14px; height: 14px;"></i>
                     </button>
-                    <span id="pdfZoomLevel" style="font-family: monospace; font-size: 0.8rem; min-width: 42px; text-align: center; color: #cbd5e1;">Fit</span>
-                    <button class="btn btn-ghost btn-sm" id="btnPdfZoomIn" title="Zoom In">
-                      <i data-lucide="plus"></i>
+                    <span id="pdfZoomLevel" style="font-family: monospace; font-size: 11px; min-width: 42px; text-align: center; color: #cbd5e1;">Fit</span>
+                    <button class="win-control-btn" id="btnPdfZoomIn" title="Zoom In">
+                      <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
                     </button>
                   </div>
                 </div>
@@ -531,7 +479,7 @@
               </div>
 
               <!-- Fallback / Empty State -->
-              <div class="pdf-empty-state" id="pdfEmptyState">
+              <div class="pdf-empty-state hidden" id="pdfEmptyState" style="display: none;">
                 <div class="pdf-empty-icon">
                   <i data-lucide="file-question" style="width: 48px; height: 48px;"></i>
                 </div>
@@ -546,13 +494,27 @@
 
     </div>
 
+    <!-- 5. CLASSIC BOTTOM STATUS BAR (FROM REFERENCE SCREENSHOT) -->
+    <footer class="bottom-status-bar">
+      <div class="status-bar-left">
+        <button class="status-app-settings-btn" onclick="document.getElementById('btnAiSettings').click()" title="Application Settings">
+          <i data-lucide="settings" style="width: 13px; height: 13px;"></i>
+          <span>Application Settings</span>
+        </button>
+      </div>
+      <div class="status-bar-center">
+        <span class="status-dot-green"></span>
+        <span class="status-center-text" id="statusOfficeText">Connected to HIP Office</span>
+      </div>
+    </footer>
+
     <!-- MODAL 1: SAVED REPORTS LIBRARY -->
     <div class="modal-layer" id="savedReportsModal" style="display: none;">
       <div class="modal-box modal-box-lg">
         <div class="modal-header">
           <div style="display: flex; align-items: center; gap: 0.5rem;">
-            <i data-lucide="archive" style="width: 18px; height: 18px; color: var(--accent);"></i>
-            <h3>Saved Inspection Reports</h3>
+            <i data-lucide="archive" style="width: 16px; height: 16px;"></i>
+            <span>Saved Inspection Reports</span>
           </div>
           <button class="btn-close" id="btnCloseSavedReportsModal">&times;</button>
         </div>
@@ -562,7 +524,7 @@
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-outline" id="btnDismissSavedReports">Close</button>
+          <button class="hip-btn" id="btnDismissSavedReports">Close</button>
         </div>
       </div>
     </div>
@@ -571,7 +533,7 @@
     <div class="modal-layer" id="addItemModal" style="display: none;">
       <div class="modal-box">
         <div class="modal-header">
-          <h3>Add Inspection Item</h3>
+          <span>Add Inspection Item</span>
           <button class="btn-close" id="btnCloseAddItemModal">&times;</button>
         </div>
         <div class="modal-body">
@@ -594,61 +556,59 @@
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-outline" id="btnCancelAddItemModal">Cancel</button>
-          <button class="btn btn-primary" id="btnConfirmAddItem">Save Item</button>
+          <button class="hip-btn" id="btnCancelAddItemModal">Cancel</button>
+          <button class="hip-btn hip-btn-primary" id="btnConfirmAddItem">Save Item</button>
         </div>
       </div>
     </div>
 
-    <!-- MODAL 3: Add New Section -->
+    <!-- MODAL 3: Add New Section / Category -->
     <div class="modal-layer" id="addSectionModal" style="display: none;">
       <div class="modal-box">
         <div class="modal-header">
-          <h3>Add Inspection System / Room</h3>
+          <span>Add Category / Room</span>
           <button class="btn-close" id="btnCloseAddSectionModal">&times;</button>
         </div>
         <div class="modal-body">
           <div class="form-field full">
-            <label for="modalNewSectionName">Section Name</label>
-            <input type="text" id="modalNewSectionName" class="input-clean" placeholder="e.g. Garage, Crawlspace, Pool & Spa, Radon">
+            <label for="modalNewSectionName">Category Name</label>
+            <input type="text" id="modalNewSectionName" class="input-clean" placeholder="e.g. Master Bedroom, HVAC System">
           </div>
           <div class="form-field full">
-            <label for="modalNewSectionDesc">Summary / Overview</label>
-            <input type="text" id="modalNewSectionDesc" class="input-clean" placeholder="Brief summary of components inspected...">
+            <label for="modalNewSectionDesc">Description / Scope (Optional)</label>
+            <input type="text" id="modalNewSectionDesc" class="input-clean" placeholder="e.g. First floor master suite">
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-outline" id="btnCancelAddSectionModal">Cancel</button>
-          <button class="btn btn-primary" id="btnConfirmAddSection">Create Section</button>
+          <button class="hip-btn" id="btnCancelAddSectionModal">Cancel</button>
+          <button class="hip-btn hip-btn-primary" id="btnConfirmAddSection">Create Category</button>
         </div>
       </div>
     </div>
 
-    <!-- MODAL 4: Photo Lightbox & Caption -->
+    <!-- MODAL 4: Photo Viewer & Caption Editor -->
     <div class="modal-layer" id="photoModal" style="display: none;">
-      <div class="modal-box modal-box-photo">
+      <div class="modal-box">
         <div class="modal-header">
-          <h3 id="photoModalTitle">Inspection Photo</h3>
+          <span id="photoModalTitle">Inspection Photo</span>
           <button class="btn-close" id="btnClosePhotoModal">&times;</button>
         </div>
-        <div class="modal-body photo-body">
-          <div class="photo-preview-wrap">
-            <img id="photoModalImg" src="" alt="Inspection Photo">
-          </div>
-          <div class="photo-info-wrap">
-            <div class="form-field full">
-              <label for="photoModalCaption">Photo Caption / Defect Note</label>
-              <textarea id="photoModalCaption" class="input-clean" rows="4" placeholder="Describe defect or component..."></textarea>
-            </div>
-            <button class="btn btn-danger btn-sm" id="btnDeletePhoto">Delete Photo</button>
+        <div class="modal-body" style="text-align: center;">
+          <img id="photoModalImg" src="" alt="Enlarged finding" style="max-width: 100%; max-height: 50vh; object-fit: contain; border: 1px solid #7f9db9; margin-bottom: 8px;">
+          <div class="form-field full" style="text-align: left;">
+            <label for="photoModalCaption">Photo Caption / Note</label>
+            <input type="text" id="photoModalCaption" class="input-clean" placeholder="e.g. Evidence of moisture staining on ceiling drywall">
           </div>
         </div>
-        <div class="modal-footer">
-          <button class="btn btn-outline" id="btnCancelPhotoModal">Cancel</button>
-          <button class="btn btn-primary" id="btnSavePhotoCaption">
-            <i data-lucide="save"></i>
-            <span>Save Caption</span>
+        <div class="modal-footer" style="justify-content: space-between;">
+          <button class="hip-btn" id="btnDeletePhoto" style="color: #dc3545;">
+            <i data-lucide="trash-2" style="width: 13px; height: 13px;"></i>
+            <span>Delete</span>
           </button>
+          <div style="display: flex; gap: 8px;">
+            <button class="hip-btn" id="btnCancelPhotoModal">Cancel</button>
+            <button class="hip-btn hip-btn-primary" id="btnSavePhotoCaption">Save Caption</button>
+          </div>
         </div>
       </div>
     </div>
@@ -658,17 +618,16 @@
       <div class="modal-box">
         <div class="modal-header">
           <div style="display: flex; align-items: center; gap: 0.5rem;">
-            <i data-lucide="sparkles" style="color: #6366f1; width: 18px; height: 18px;"></i>
-            <h3>Gemini AI Configuration</h3>
+            <i data-lucide="sparkles" style="width: 16px; height: 16px;"></i>
+            <span>Gemini AI Configuration</span>
           </div>
           <button class="btn-close" id="btnCloseAiSettingsModal">&times;</button>
         </div>
         <div class="modal-body">
-          <div class="ai-help-banner">
-            <p>Use a free Google Gemini API key to automatically polish notes and audit inspections.</p>
-            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="link-ai-studio">
-              <i data-lucide="external-link" style="width: 14px; height: 14px;"></i>
-              <span>Get Free Gemini API Key (Google AI Studio)</span>
+          <div class="form-field full">
+            <p style="font-size: 11px; color: #555555; margin-bottom: 4px;">Use a free Google Gemini API key to automatically polish notes and audit inspections.</p>
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" style="font-size: 11px; color: #0d6efd;">
+              Get Free Gemini API Key (Google AI Studio) &rarr;
             </a>
           </div>
 
@@ -687,17 +646,17 @@
             </select>
           </div>
 
-          <div class="ai-status-box" id="aiStatusBox">
-            <div class="ai-status-row">
-              <span class="status-dot" id="modalAiDot"></span>
-              <span id="modalAiStatusMsg">Checking connection...</span>
+          <div class="ai-status-box" id="aiStatusBox" style="padding: 6px; background: #ffffff; border: 1px solid #7f9db9; margin-top: 6px;">
+            <div class="ai-status-row" style="display: flex; align-items: center; gap: 6px;">
+              <span class="status-dot" id="modalAiDot" style="width: 8px; height: 8px; border-radius: 50%; background: #22c55e;"></span>
+              <span id="modalAiStatusMsg" style="font-size: 11px;">Checking connection...</span>
             </div>
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-outline" id="btnCancelAiSettings">Cancel</button>
-          <button class="btn btn-primary" id="btnSaveAiKey">
-            <i data-lucide="save"></i>
+          <button class="hip-btn" id="btnCancelAiSettings">Cancel</button>
+          <button class="hip-btn hip-btn-primary" id="btnSaveAiKey">
+            <i data-lucide="save" style="width: 14px; height: 14px;"></i>
             <span>Test & Save Key</span>
           </button>
         </div>
@@ -709,37 +668,37 @@
       <div class="modal-box modal-box-lg">
         <div class="modal-header">
           <div style="display: flex; align-items: center; gap: 0.5rem;">
-            <i data-lucide="shield-check" style="color: var(--accent); width: 18px; height: 18px;"></i>
-            <h3>QA Compliance & Quality Audit</h3>
+            <i data-lucide="shield-check" style="width: 16px; height: 16px;"></i>
+            <span>QA Compliance & Quality Audit</span>
           </div>
           <button class="btn-close" id="btnCloseQaModal">&times;</button>
         </div>
         <div class="modal-body">
-          <div class="qa-scorecard-header">
-            <div class="qa-score-circle" id="qaScoreCircle">
-              <span class="qa-score-number" id="modalQaScoreNum">0</span>
-              <span class="qa-score-label">Health Score</span>
+          <div style="display: flex; gap: 16px; margin-bottom: 16px; align-items: center;">
+            <div class="qa-score-circle" id="qaScoreCircle" style="width: 60px; height: 60px; border-radius: 50%; border: 3px solid #316ac5; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: bold;">
+              <span class="qa-score-number" id="modalQaScoreNum" style="font-size: 18px;">0</span>
+              <span class="qa-score-label" style="font-size: 9px;">SCORE</span>
             </div>
             <div class="qa-summary-details">
-              <h4 id="qaVerdictTitle">Auditing inspection...</h4>
-              <p id="qaVerdictDesc">Rule-based compliance engine checking photographic evidence and standard coverage.</p>
-              <div class="qa-stats-row">
-                <span class="badge-stat stat-high" id="qaCountHigh">0 Critical</span>
-                <span class="badge-stat stat-med" id="qaCountMed">0 Warnings</span>
-                <span class="badge-stat stat-low" id="qaCountLow">0 Notices</span>
+              <h4 id="qaVerdictTitle" style="font-size: 13px; font-weight: 700;">Auditing inspection...</h4>
+              <p id="qaVerdictDesc" style="font-size: 11px; color: #555555;">Rule-based compliance engine checking coverage and findings.</p>
+              <div class="qa-stats-row" style="display: flex; gap: 8px; margin-top: 6px;">
+                <span class="badge-stat stat-high" id="qaCountHigh" style="padding: 2px 6px; background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; border-radius: 2px;">0 Critical</span>
+                <span class="badge-stat stat-med" id="qaCountMed" style="padding: 2px 6px; background: #fffde7; color: #f57f17; border: 1px solid #fff59d; border-radius: 2px;">0 Warnings</span>
+                <span class="badge-stat stat-low" id="qaCountLow" style="padding: 2px 6px; background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; border-radius: 2px;">0 Notices</span>
               </div>
             </div>
           </div>
 
           <div class="qa-issues-container">
-            <h4>Audit Findings</h4>
-            <div class="qa-issues-list" id="qaIssuesList">
+            <h4 style="font-size: 12px; margin-bottom: 6px;">Audit Findings</h4>
+            <div class="qa-issues-list" id="qaIssuesList" style="max-height: 250px; overflow-y: auto; background: #ffffff; border: 1px solid #7f9db9; padding: 8px;">
               <!-- Dynamically populated -->
             </div>
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-outline" id="btnCloseQaModalBtn">Close</button>
+          <button class="hip-btn" id="btnCloseQaModalBtn">Close</button>
         </div>
       </div>
     </div>
@@ -749,25 +708,20 @@
       <div class="modal-box modal-box-lg">
         <div class="modal-header">
           <div style="display: flex; align-items: center; gap: 0.5rem;">
-            <i data-lucide="sparkles" style="color: #6366f1; width: 18px; height: 18px;"></i>
-            <h3>AI Pre-Edited Narratives (Review & Accept)</h3>
+            <i data-lucide="sparkles" style="width: 16px; height: 16px;"></i>
+            <span>AI Pre-Edited Narratives (Review & Accept)</span>
           </div>
           <button class="btn-close" id="btnCloseBatchReviewModal">&times;</button>
         </div>
         <div class="modal-body">
-          <p class="text-muted" style="font-size: 0.85rem;">
-            The AI engine translated raw field notes into formal InterNACHI-standard narratives (Observation, Implication, Recommendation). Review the suggestions below:
-          </p>
-          <div class="ai-diff-stream" id="aiDiffStream">
-            <!-- Dynamically populated -->
+          <p style="font-size: 11px; color: #555555; margin-bottom: 10px;">Review proposed corrections below. You can accept all or discard.</p>
+          <div class="ai-diff-stream" id="aiDiffStream" style="max-height: 350px; overflow-y: auto; background: #ffffff; border: 1px solid #7f9db9; padding: 8px;">
+            <!-- Rendered dynamically -->
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-outline" id="btnDiscardBatchReview">Discard</button>
-          <button class="btn btn-primary" id="btnAcceptAllBatchReview">
-            <i data-lucide="check-check"></i>
-            <span>Accept All Suggestions</span>
-          </button>
+          <button class="hip-btn" id="btnDiscardBatchReview">Discard All</button>
+          <button class="hip-btn hip-btn-primary" id="btnAcceptAllBatchReview">Accept All Revisions</button>
         </div>
       </div>
     </div>
@@ -777,117 +731,98 @@
       <div class="modal-box modal-box-lg">
         <div class="modal-header">
           <div style="display: flex; align-items: center; gap: 0.5rem;">
-            <i data-lucide="file-check-2" style="color: var(--accent); width: 18px; height: 18px;"></i>
-            <h3>Executive Defect Summary</h3>
+            <i data-lucide="file-check-2" style="width: 16px; height: 16px;"></i>
+            <span>Executive Defect Summary</span>
           </div>
           <button class="btn-close" id="btnCloseSummaryModal">&times;</button>
         </div>
         <div class="modal-body">
-          <div id="aiSummaryContent" class="executive-summary-content">
-            <!-- Rendered dynamically -->
+          <div class="ai-summary-content" id="aiSummaryContent" style="max-height: 350px; overflow-y: auto; background: #ffffff; border: 1px solid #7f9db9; padding: 12px; font-size: 12px; line-height: 1.5;">
+            <!-- Populated dynamically -->
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-outline" id="btnCloseSummaryModalBtn">Close</button>
-          <button class="btn btn-primary" id="btnCopySummaryText">
-            <i data-lucide="copy"></i>
-            <span>Copy Summary</span>
+          <button class="hip-btn" id="btnCloseSummaryModalBtn">Close</button>
+          <button class="hip-btn hip-btn-primary" id="btnCopySummaryText">
+            <i data-lucide="copy" style="width: 13px; height: 13px;"></i>
+            <span>Copy to Clipboard</span>
           </button>
         </div>
       </div>
     </div>
 
-    <!-- MODAL 9: Export PDF with Cover Photo Upload & Inspector Customization -->
+    <!-- MODAL 9: Dedicated PDF Cover & Branding Customizer Modal -->
     <div class="modal-layer" id="exportPdfModal" style="display: none;">
       <div class="modal-box modal-box-lg">
         <div class="modal-header">
           <div style="display: flex; align-items: center; gap: 0.5rem;">
-            <i data-lucide="file-text" style="color: #dc2626; width: 20px; height: 20px;"></i>
-            <h3>Download Visual PDF Report</h3>
+            <i data-lucide="file-text" style="width: 16px; height: 16px;"></i>
+            <span>PDF Export & Cover Customizer</span>
           </div>
           <button class="btn-close" id="btnCloseExportPdfModal">&times;</button>
         </div>
         <div class="modal-body">
-          <p class="pdf-modal-tip text-muted">
-            Generates the exact visual Home Inspector Pro layout matching <strong>Mantra Mirari Flat No.E-404.pdf</strong> with royal blue borders, status matrices, photo galleries, and report summary.
-          </p>
-
-          <!-- Cover Photo Picker & Upload -->
-          <div class="cover-photo-section">
-            <h4 class="cover-section-title">
-              <i data-lucide="image" style="width: 16px; height: 16px; color: var(--accent);"></i>
-              <span>Page 1 Cover Photo (Building / House Exterior)</span>
-            </h4>
-            
-            <div class="cover-photo-preview-card">
-              <div class="cover-photo-frame" id="pdfCoverPreviewFrame">
-                <img id="pdfCoverPreviewImg" src="" alt="Cover Photo Preview" style="display: none;" />
-                <div id="pdfCoverPlaceholder" class="cover-photo-empty">
-                  <i data-lucide="image" style="width: 32px; height: 32px; opacity: 0.4;"></i>
-                  <span>No cover photo selected</span>
-                </div>
+          <!-- Page 1 Cover Photo Chooser -->
+          <div class="pdf-cover-section" style="margin-bottom: 16px;">
+            <h4 style="font-size: 12px; font-weight: 700; margin-bottom: 8px;">Report Cover Photo (Page 1)</h4>
+            <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
+              <div class="pdf-cover-preview-frame" id="pdfCoverPreviewFrame" style="width: 120px; height: 90px; border: 1px solid #7f9db9; background: #ffffff; display: flex; align-items: center; justify-content: center;">
+                <img id="pdfCoverPreviewImg" src="" alt="Cover Preview" style="max-width: 100%; max-height: 100%; object-fit: cover; display: none;" />
+                <div id="pdfCoverPlaceholder" style="font-size: 10px; color: #888888; text-align: center;">No Image</div>
               </div>
-
-              <div class="cover-photo-actions">
+              <div style="display: flex; flex-direction: column; gap: 6px;">
                 <input type="file" id="pdfCoverFileInput" accept="image/jpeg,image/png,image/webp" style="display: none;" />
-                <div class="cover-actions-button-group">
-                  <button type="button" class="btn btn-outline btn-sm" id="btnUploadCoverFile">
-                    <i data-lucide="upload"></i>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                  <button type="button" class="hip-btn" id="btnUploadCoverFile">
+                    <i data-lucide="upload" style="width: 13px; height: 13px;"></i>
                     <span>Upload Building Photo</span>
                   </button>
-                  <button type="button" class="btn btn-outline btn-sm" id="btnToggleReportPhotos">
-                    <i data-lucide="images"></i>
+                  <button type="button" class="hip-btn" id="btnToggleReportPhotos">
+                    <i data-lucide="images" style="width: 13px; height: 13px;"></i>
                     <span>Choose from Report Photos (<span id="reportPhotosCount">0</span>)</span>
                   </button>
-                  <button type="button" class="btn btn-ghost btn-sm" id="btnResetCoverPhoto">
-                    <i data-lucide="rotate-ccw"></i>
+                  <button type="button" class="hip-btn" id="btnResetCoverPhoto">
+                    <i data-lucide="rotate-ccw" style="width: 13px; height: 13px;"></i>
                     <span>Default Hero</span>
                   </button>
                 </div>
-                <div class="cover-source-indicator">
+                <div style="font-size: 11px;">
                   <span>Selected Source: </span>
-                  <strong id="coverSourceLabel" style="color: var(--accent);">Default Bundled Hero</strong>
+                  <strong id="coverSourceLabel" style="color: #0b5ed7;">Default Bundled Hero</strong>
                 </div>
               </div>
             </div>
 
             <!-- Expandable Inspection Photo Gallery Grid for 1-click cover selection -->
-            <div class="report-photos-drawer" id="reportPhotosDrawer" style="display: none;">
-              <div class="drawer-instruction">Click any photo from your inspection items to set as Page 1 Cover:</div>
-              <div class="report-photos-grid" id="reportPhotosGrid">
-                <!-- Dynamically populated with inspection item photos -->
+            <div class="report-photos-drawer" id="reportPhotosDrawer" style="display: none; margin-top: 10px; border: 1px solid #7f9db9; padding: 8px; background: #ffffff;">
+              <div style="font-size: 11px; margin-bottom: 6px; font-weight: 600;">Click any photo to set as Page 1 Cover:</div>
+              <div class="report-photos-grid" id="reportPhotosGrid" style="display: flex; gap: 8px; flex-wrap: wrap; max-height: 150px; overflow-y: auto;">
+                <!-- Dynamically populated -->
               </div>
             </div>
           </div>
 
           <!-- Inspector & Company Details Customizer -->
           <div class="pdf-meta-section">
-            <h4 class="cover-section-title">
-              <i data-lucide="user-check" style="width: 16px; height: 16px; color: var(--accent);"></i>
-              <span>Inspector & Company Branding</span>
-            </h4>
-            <div class="form-grid pdf-branding-grid">
-              <div class="form-field">
-                <label for="pdfCompanyName">Inspection Company</label>
-                <input type="text" id="pdfCompanyName" class="input-clean" placeholder="N G Home Inspection Services">
-              </div>
-              <div class="form-field">
-                <label for="pdfInspectorName">Inspector Name</label>
-                <input type="text" id="pdfInspectorName" class="input-clean" placeholder="Nitin Gujarathi">
-              </div>
-              <div class="form-field">
-                <label for="pdfInspectorPhone">Phone Number</label>
-                <input type="text" id="pdfInspectorPhone" class="input-clean" placeholder="00919890002635">
-              </div>
-              <div class="form-field">
-                <label for="pdfInspectorEmail">Email Address</label>
-                <input type="email" id="pdfInspectorEmail" class="input-clean" placeholder="niting@macj.in">
-              </div>
-              <div class="form-field full">
-                <label for="pdfInspectorAddress">Office Address</label>
-                <input type="text" id="pdfInspectorAddress" class="input-clean" placeholder="4_4 Yugaymangal complex, Kothrud, Pune, Maharashtra 411038">
-              </div>
-            </div>
+            <h4 style="font-size: 12px; font-weight: 700; margin-bottom: 8px;">Inspector & Company Branding</h4>
+            <table class="hip-form-table">
+              <tr>
+                <td class="hip-lbl"><label for="pdfCompanyName">Inspection Company</label></td>
+                <td class="hip-val"><input type="text" id="pdfCompanyName" class="hip-input" placeholder="N G Home Inspection Services"></td>
+                <td class="hip-lbl"><label for="pdfInspectorName">Inspector Name</label></td>
+                <td class="hip-val"><input type="text" id="pdfInspectorName" class="hip-input" placeholder="Nitin Gujarathi"></td>
+              </tr>
+              <tr>
+                <td class="hip-lbl"><label for="pdfInspectorPhone">Phone Number</label></td>
+                <td class="hip-val"><input type="text" id="pdfInspectorPhone" class="hip-input" placeholder="00919890002635"></td>
+                <td class="hip-lbl"><label for="pdfInspectorEmail">Email Address</label></td>
+                <td class="hip-val"><input type="email" id="pdfInspectorEmail" class="hip-input" placeholder="niting@macj.in"></td>
+              </tr>
+              <tr>
+                <td class="hip-lbl"><label for="pdfInspectorAddress">Office Address</label></td>
+                <td class="hip-val" colspan="3"><input type="text" id="pdfInspectorAddress" class="hip-input" placeholder="4_4 Yugaymangal complex, Kothrud, Pune, Maharashtra 411038"></td>
+              </tr>
+            </table>
           </div>
 
           <!-- Loading state overlay during generation -->
@@ -898,11 +833,45 @@
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-outline" id="btnCancelExportPdf">Cancel</button>
-          <button class="btn btn-primary btn-generate-pdf" id="btnSubmitGeneratePdf">
-            <i data-lucide="download"></i>
+          <button class="hip-btn" id="btnCancelExportPdf">Cancel</button>
+          <button class="hip-btn hip-btn-primary" id="btnSubmitGeneratePdf">
+            <i data-lucide="download" style="width: 14px; height: 14px;"></i>
             <span>Generate & Download PDF</span>
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 10: Unsaved Changes / Back to Dashboard Confirmation -->
+    <div class="modal-layer" id="confirmLeaveModal" style="display: none; z-index: 10000;">
+      <div class="modal-box" style="max-width: 450px; background: #ece9d8; border: 2px solid #0055ea; border-radius: 4px; box-shadow: 0 8px 30px rgba(0,0,0,0.45); font-family: Tahoma, Segoe UI, sans-serif;">
+        <div class="modal-header" style="background: linear-gradient(180deg, #0a246a 0%, #a6caf0 100%); color: #ffffff; padding: 6px 10px; font-weight: 700; font-size: 13px; display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <i data-lucide="alert-triangle" style="width: 16px; height: 16px; color: #ffeb3b;"></i>
+            <span>Warning: Unsaved Inspection</span>
+          </div>
+          <button class="btn-close" id="btnCloseConfirmLeave" style="color: #ffffff; cursor: pointer; border: none; background: #e81123; border-radius: 2px; width: 22px; height: 22px; font-weight: bold; line-height: 18px;">&times;</button>
+        </div>
+        <div class="modal-body" style="padding: 16px; background: #ffffff;">
+          <p style="font-size: 13px; font-weight: 700; color: #111827; margin: 0 0 8px 0;">
+            Do you want to save your inspection report before going back to the dashboard?
+          </p>
+          <p style="font-size: 12px; color: #b91c1c; margin: 0 0 16px 0; line-height: 1.4; background: #fef2f2; border: 1px solid #fecaca; padding: 8px; border-radius: 4px;">
+            <strong>Notice:</strong> If you leave without saving, any unsaved findings, property info, and mobile photos will be gone!
+          </p>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <button id="btnSaveAndLeave" class="hip-btn" style="width: 100%; justify-content: center; background: #0055ea; color: #ffffff; font-weight: 700; padding: 8px 12px; border: 1px solid #003db8; border-radius: 3px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+              <i data-lucide="save" style="width: 15px; height: 15px;"></i>
+              <span>Save Inspection & Return to Dashboard</span>
+            </button>
+            <button id="btnDiscardAndLeave" class="hip-btn" style="width: 100%; justify-content: center; background: #ffffff; color: #dc2626; border: 1px solid #dc2626; padding: 7px 12px; border-radius: 3px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+              <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
+              <span>Leave Without Saving (Data will be gone)</span>
+            </button>
+            <button id="btnStayInWorkspace" class="hip-btn" style="width: 100%; justify-content: center; background: #ece9d8; color: #222222; border: 1px solid #7f9db9; padding: 7px 12px; border-radius: 3px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+              <span>Cancel (Stay in Workspace)</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -922,8 +891,7 @@
       }
     } catch(e) {}
   </script>
-  <script src="config.js?v=218"></script>
-  <script src="app.js?v=218"></script>
+  <script src="config.js?v=hip-print-pdf-v1"></script>
+  <script src="app.js?v=hip-print-pdf-v1"></script>
 </body>
 </html>
-
