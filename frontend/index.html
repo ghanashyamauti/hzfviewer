@@ -27,7 +27,7 @@
     }
   </script>
 
-  <link rel="stylesheet" href="styles.css?v=hip-print-pdf-v1">
+  <link rel="stylesheet" href="styles.css?v=hip-livecam-v1">
 </head>
 <body class="classic-desktop-body">
   <div class="app-shell classic-window">
@@ -38,12 +38,18 @@
         <input type="file" id="fileUploadInput" accept=".hzf,.bin,.zip" style="display: none;">
 
         <!-- Brand / Home Button -->
-        <div class="toolbar-brand" id="brandHomeBtn" title="Back to Home Dashboard" style="cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 4px 8px; margin-right: 4px;">
+        <div class="toolbar-brand" id="brandHomeBtn" title="HIP Studio" style="cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 4px 8px; margin-right: 4px;">
           <i data-lucide="shield-check" style="color: #0b5ed7; width: 22px; height: 22px;"></i>
-          <span style="font-weight: 700; font-size: 13px; color: #111;">HIP Studio</span>
+          <span id="brandTitleText" style="font-weight: 700; font-size: 13px; color: #111;">HIP Studio</span>
         </div>
 
-        <div class="toolbar-divider"></div>
+        <!-- Admin Back to Dashboard Button (Visible when Admin is inspecting a report in workspace) -->
+        <button class="toolbar-btn" id="btnAdminBackToDash" title="Return to Administrator Control Center" style="display: none; background: #eff6ff; color: #1d4ed8; border: 1px solid #93c5fd; font-weight: 700; padding: 4px 12px; border-radius: 4px; align-items: center; gap: 6px;">
+          <i data-lucide="arrow-left" style="width: 14px; height: 14px; color: #1d4ed8;"></i>
+          <span style="font-size: 11.5px; font-weight: 700;">Back to Admin Panel</span>
+        </button>
+
+        <div class="toolbar-divider" id="toolbarDividerNav"></div>
 
         <!-- Open File -->
         <button class="toolbar-btn" id="btnOpenExisting" title="Open .hzf or .bin inspection file">
@@ -65,6 +71,19 @@
           </div>
           <span class="toolbar-btn-text">Saved Reports</span>
         </button>
+
+        <!-- Admin & User Profile Controls -->
+        <div class="toolbar-user-wrap" id="toolbarUserWrap" style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+          <div class="toolbar-user-pill" id="toolbarUserPill" title="Logged in User" style="display: flex; align-items: center; gap: 6px; padding: 2px 8px; background: #fff; border: 1px solid #7f9db9; border-radius: 3px; font-size: 11px;">
+            <i data-lucide="user" style="width: 13px; height: 13px; color: #003366;"></i>
+            <span id="navUserName" style="font-weight: 600; color: #000;">Inspector</span>
+            <span id="navUserRoleBadge" class="badge-role" style="font-size: 9px; padding: 1px 4px; background: #e0f2fe; color: #0284c7; border-radius: 2px; font-weight: 700; text-transform: uppercase;">User</span>
+          </div>
+          <button class="toolbar-btn toolbar-btn-logout" id="btnNavLogout" title="Log Out from Studio">
+            <i data-lucide="log-out" style="color: #dc2626;"></i>
+            <span class="toolbar-btn-text">Log Out</span>
+          </button>
+        </div>
 
         <!-- Hidden elements for app.js backwards compatibility -->
         <button class="toolbar-btn nav-back-btn" id="btnNavBack" style="display: none;"></button>
@@ -133,8 +152,218 @@
     </div>
     <div class="mobile-nav-backdrop" id="mobileNavBackdrop" style="display: none;"></div>
 
+    <!-- AUTHENTICATION SCREEN (LOGIN, SIGN UP, FORGOT PASSWORD & OTP VERIFICATION) -->
+    <div class="auth-screen-overlay" id="authScreen" style="display: none;">
+      <div class="auth-window classic-dialog">
+        <div class="auth-titlebar">
+          <div class="auth-titlebar-left">
+            <i data-lucide="shield-check" style="width: 15px; height: 15px; color: #ffffff;"></i>
+            <span>HZF Inspector Studio - User Authentication</span>
+          </div>
+          <div class="auth-titlebar-controls">
+            <span class="auth-ctrl-btn" title="Minimize">—</span>
+            <span class="auth-ctrl-btn" title="Maximize">□</span>
+            <span class="auth-ctrl-btn auth-ctrl-close" title="Close">✕</span>
+          </div>
+        </div>
+
+        <div class="auth-dialog-body">
+          <!-- Top Access Banner Card -->
+          <div class="auth-welcome-card">
+            <div class="auth-welcome-icon">
+              <i data-lucide="lock" style="width: 20px; height: 20px; color: #0055ea;"></i>
+            </div>
+            <div class="auth-welcome-text">
+              <h3 class="auth-welcome-heading">Home Inspector Pro Studio Access</h3>
+              <p class="auth-welcome-sub">Sign in to your inspector account or register a new account to manage inspections, AI polish, and PDF exports.</p>
+            </div>
+          </div>
+
+          <!-- Auth Navigation Tabs -->
+          <div class="auth-tabs-bar" id="authTabsBar">
+            <button class="auth-tab active" id="tabAuthLogin" type="button">
+              <i data-lucide="log-in" style="width: 13px; height: 13px;"></i>
+              <span>Log In</span>
+            </button>
+            <button class="auth-tab" id="tabAuthRegister" type="button">
+              <i data-lucide="user-plus" style="width: 13px; height: 13px;"></i>
+              <span>Sign Up (New Inspector)</span>
+            </button>
+          </div>
+
+          <!-- Notification / Error Box -->
+          <div class="auth-alert" id="authAlert" style="display: none;"></div>
+
+          <!-- 1. LOGIN FORM -->
+          <form class="auth-form" id="formAuthLogin">
+            <div class="form-group-win">
+              <label for="loginEmail">Email Address <span class="req">*</span></label>
+              <input type="email" id="loginEmail" class="win-input" placeholder="inspector@company.com" required autocomplete="email">
+            </div>
+            <div class="form-group-win">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <label for="loginPassword" style="margin-bottom: 0;">Password <span class="req">*</span></label>
+                <a href="#" id="linkForgotPassword" style="font-size: 11px; color: #0055ea; text-decoration: underline; font-weight: 600;">Forgot Password?</a>
+              </div>
+              <input type="password" id="loginPassword" class="win-input" placeholder="Enter your password" required autocomplete="current-password">
+            </div>
+            <div class="auth-actions">
+              <button type="submit" class="hip-btn hip-btn-primary auth-submit-btn" id="btnLoginSubmit">
+                <i data-lucide="log-in" style="width: 14px; height: 14px;"></i>
+                <span>Log In to Studio</span>
+              </button>
+            </div>
+            <div class="auth-switch-hint">
+              Don't have an inspector account? <a href="#" id="linkSwitchToRegister">Sign Up here</a>
+            </div>
+          </form>
+
+          <!-- 2. SIGN UP FORM -->
+          <form class="auth-form" id="formAuthRegister" style="display: none;">
+            <div class="auth-grid-2">
+              <div class="form-group-win">
+                <label for="regName">Full Name <span class="req">*</span></label>
+                <input type="text" id="regName" class="win-input" placeholder="e.g. Nitin Gujarathi" required>
+              </div>
+              <div class="form-group-win">
+                <label for="regPhone">Phone Number <span class="req">*</span></label>
+                <input type="tel" id="regPhone" class="win-input" placeholder="e.g. 00919890002635" required>
+              </div>
+            </div>
+
+            <div class="form-group-win">
+              <label for="regOrg">Organization / Company <span class="opt">(Optional)</span></label>
+              <input type="text" id="regOrg" class="win-input" placeholder="e.g. N G Home Inspection Services">
+            </div>
+
+            <div class="form-group-win">
+              <label for="regEmail">Email Address <span class="req">*</span></label>
+              <input type="email" id="regEmail" class="win-input" placeholder="inspector@company.com" required autocomplete="email">
+            </div>
+
+            <div class="auth-grid-2">
+              <div class="form-group-win">
+                <label for="regPassword">Password <span class="req">*</span></label>
+                <input type="password" id="regPassword" class="win-input" placeholder="At least 6 characters" minlength="6" required autocomplete="new-password">
+              </div>
+              <div class="form-group-win">
+                <label for="regConfirmPassword">Confirm Password <span class="req">*</span></label>
+                <input type="password" id="regConfirmPassword" class="win-input" placeholder="Re-enter password" minlength="6" required autocomplete="new-password">
+              </div>
+            </div>
+
+            <div class="auth-actions">
+              <button type="submit" class="hip-btn hip-btn-primary auth-submit-btn" id="btnRegisterSubmit">
+                <i data-lucide="mail-check" style="width: 14px; height: 14px;"></i>
+                <span>Sign Up &amp; Send Verification Code</span>
+              </button>
+            </div>
+            <div class="auth-switch-hint">
+              Already have an account? <a href="#" id="linkSwitchToLogin">Log In here</a>
+            </div>
+          </form>
+
+          <!-- 3. OTP VERIFICATION FORM -->
+          <form class="auth-form" id="formAuthOtp" style="display: none;">
+            <div class="otp-notice">
+              <div style="display: flex; justify-content: center; margin-bottom: 4px;">
+                <i data-lucide="mail-check" style="width: 26px; height: 26px; color: #003366;"></i>
+              </div>
+              <h4 style="margin: 0 0 4px 0; color: #003366; font-size: 13.5px; font-weight: 700;">Enter Email Verification Code</h4>
+              <p style="margin: 0; font-size: 11px; color: #555555; line-height: 1.35;">A 6-digit verification code was sent to <strong id="otpTargetEmail">your email</strong>. Please enter the code below to complete sign up.</p>
+            </div>
+
+            <div class="form-group-win" style="text-align: center; margin-top: 8px;">
+              <label for="otpCodeInput" style="display: block; font-weight: 700; margin-bottom: 4px; color: #003366; font-size: 11px;">6-Digit OTP Code</label>
+              <input type="text" id="otpCodeInput" class="win-input otp-input-large" maxlength="6" placeholder="000000" required autocomplete="one-time-code">
+            </div>
+
+            <div class="auth-actions" style="margin-top: 10px;">
+              <button type="submit" class="hip-btn hip-btn-primary auth-submit-btn" id="btnVerifyOtpSubmit">
+                <i data-lucide="check-circle-2" style="width: 14px; height: 14px;"></i>
+                <span>Verify Code &amp; Launch Studio</span>
+              </button>
+            </div>
+
+            <div class="otp-resend-row" style="margin-top: 8px; text-align: center; font-size: 11px;">
+              <button type="button" class="btn-link" id="btnResendOtp" style="background: none; border: none; color: #0055ea; font-weight: 600; cursor: pointer; text-decoration: underline;">Resend Code</button>
+              <span class="sep" style="margin: 0 6px; color: #999;">•</span>
+              <button type="button" class="btn-link" id="btnBackToAuth" style="background: none; border: none; color: #64748b; cursor: pointer; text-decoration: underline;">Back to Sign In</button>
+            </div>
+          </form>
+
+          <!-- 4. FORGOT PASSWORD REQUEST FORM -->
+          <form class="auth-form" id="formAuthForgotPassword" style="display: none;">
+            <div class="otp-notice">
+              <div style="display: flex; justify-content: center; margin-bottom: 4px;">
+                <i data-lucide="key-round" style="width: 26px; height: 26px; color: #003366;"></i>
+              </div>
+              <h4 style="margin: 0 0 4px 0; color: #003366; font-size: 13.5px; font-weight: 700;">Forgot Inspector Password</h4>
+              <p style="margin: 0; font-size: 11px; color: #555555; line-height: 1.35;">Enter your registered email address and we'll send a 6-digit code to reset your password.</p>
+            </div>
+
+            <div class="form-group-win">
+              <label for="forgotEmail">Email Address <span class="req">*</span></label>
+              <input type="email" id="forgotEmail" class="win-input" placeholder="inspector@company.com" required autocomplete="email">
+            </div>
+
+            <div class="auth-actions">
+              <button type="submit" class="hip-btn hip-btn-primary auth-submit-btn" id="btnForgotSubmit">
+                <i data-lucide="mail" style="width: 14px; height: 14px;"></i>
+                <span>Send Password Reset Code</span>
+              </button>
+            </div>
+
+            <div class="auth-switch-hint">
+              Remembered your password? <a href="#" id="linkBackToLoginFromForgot">Back to Log In</a>
+            </div>
+          </form>
+
+          <!-- 5. RESET PASSWORD CONFIRMATION FORM -->
+          <form class="auth-form" id="formAuthResetPassword" style="display: none;">
+            <div class="otp-notice">
+              <div style="display: flex; justify-content: center; margin-bottom: 4px;">
+                <i data-lucide="shield-alert" style="width: 26px; height: 26px; color: #003366;"></i>
+              </div>
+              <h4 style="margin: 0 0 4px 0; color: #003366; font-size: 13.5px; font-weight: 700;">Set New Password</h4>
+              <p style="margin: 0; font-size: 11px; color: #555555; line-height: 1.35;">Enter the 6-digit code sent to <strong id="resetTargetEmail">your email</strong> and your new password.</p>
+            </div>
+
+            <div class="form-group-win" style="text-align: center; margin-top: 6px;">
+              <label for="resetOtpCode" style="display: block; font-weight: 700; margin-bottom: 4px; color: #003366; font-size: 11px;">6-Digit Reset Code <span class="req">*</span></label>
+              <input type="text" id="resetOtpCode" class="win-input otp-input-large" maxlength="6" placeholder="000000" required autocomplete="one-time-code">
+            </div>
+
+            <div class="auth-grid-2">
+              <div class="form-group-win">
+                <label for="resetNewPassword">New Password <span class="req">*</span></label>
+                <input type="password" id="resetNewPassword" class="win-input" placeholder="Min. 6 chars" minlength="6" required autocomplete="new-password">
+              </div>
+              <div class="form-group-win">
+                <label for="resetConfirmPassword">Confirm Password <span class="req">*</span></label>
+                <input type="password" id="resetConfirmPassword" class="win-input" placeholder="Re-enter password" minlength="6" required autocomplete="new-password">
+              </div>
+            </div>
+
+            <div class="auth-actions">
+              <button type="submit" class="hip-btn hip-btn-primary auth-submit-btn" id="btnResetPasswordSubmit">
+                <i data-lucide="check-circle" style="width: 14px; height: 14px;"></i>
+                <span>Update Password &amp; Log In</span>
+              </button>
+            </div>
+
+            <div class="otp-resend-row" style="margin-top: 8px; text-align: center; font-size: 11px;">
+              <button type="button" class="btn-link" id="btnResendResetOtp" style="background: none; border: none; color: #0055ea; font-weight: 600; cursor: pointer; text-decoration: underline;">Resend Code</button>
+              <span class="sep" style="margin: 0 6px; color: #999;">•</span>
+              <button type="button" class="btn-link" id="linkBackToLoginFromReset" style="background: none; border: none; color: #64748b; cursor: pointer; text-decoration: underline;">Cancel / Log In</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
     <!-- STATE 1: WELCOME SCREEN (CLASSIC WIZARD / DIALOG) -->
-    <section class="welcome-screen" id="welcomeScreen">
+    <section class="welcome-screen" id="welcomeScreen" style="display: none;">
       <div class="welcome-card">
         <div class="welcome-badge">HOME INSPECTOR PRO COMPATIBLE</div>
         <h1>HZF & BIN Inspection Studio</h1>
@@ -494,19 +723,115 @@
 
     </div>
 
-    <!-- 5. CLASSIC BOTTOM STATUS BAR (FROM REFERENCE SCREENSHOT) -->
-    <footer class="bottom-status-bar">
-      <div class="status-bar-left">
-        <button class="status-app-settings-btn" onclick="document.getElementById('btnAiSettings').click()" title="Application Settings">
-          <i data-lucide="settings" style="width: 13px; height: 13px;"></i>
-          <span>Application Settings</span>
-        </button>
+    <!-- STATE 3: ADMIN MANAGEMENT PANEL -->
+    <div id="adminScreen" class="admin-screen-container" style="display: none; flex-direction: column; flex: 1; overflow-y: auto; padding: 20px 24px; width: 100%; max-width: 1360px; margin: 0 auto; box-sizing: border-box; background: #f8fafc; gap: 16px;">
+      
+      <!-- Minimal Clean Top Header -->
+      <div style="display: flex; align-items: center; justify-content: space-between; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 14px 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.03); flex-wrap: wrap; gap: 12px;">
+        <div style="display: flex; align-items: center; gap: 12px; min-width: 260px;">
+          <div style="width: 38px; height: 38px; border-radius: 6px; background: #eff6ff; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+            <i data-lucide="shield-check" style="width: 20px; height: 20px; color: #2563eb;"></i>
+          </div>
+          <div>
+            <h2 style="margin: 0; font-size: 15px; font-weight: 700; color: #0f172a; line-height: 1.2;">Inspector Accounts &amp; Activity Directory</h2>
+            <p style="margin: 3px 0 0 0; font-size: 12px; color: #64748b;">Review registered inspector accounts, activity status, and saved inspection reports.</p>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 4px; padding: 3px 10px; gap: 6px;">
+            <i data-lucide="search" style="width: 14px; height: 14px; color: #64748b;"></i>
+            <input type="text" id="adminUserSearchInput" style="border: none; outline: none; font-size: 12px; padding: 4px; width: 220px; background: transparent; font-family: inherit;" placeholder="Search by name, email...">
+          </div>
+          <button class="hip-btn" id="btnAdminRefresh" title="Refresh metrics and users list" style="padding: 6px 12px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 4px; cursor: pointer; font-weight: 600; color: #334155;">
+            <i data-lucide="refresh-cw" style="width: 13px; height: 13px;"></i>
+            <span>Refresh</span>
+          </button>
+        </div>
       </div>
-      <div class="status-bar-center">
-        <span class="status-dot-green"></span>
-        <span class="status-center-text" id="statusOfficeText">Connected to HIP Office</span>
+
+      <!-- 4 Clean Minimal Metric Cards (Responsive Grid) -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px;">
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 14px 18px; display: flex; align-items: center; gap: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
+          <div style="width: 40px; height: 40px; border-radius: 6px; background: #eff6ff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: #2563eb;">
+            <i data-lucide="users" style="width: 20px; height: 20px;"></i>
+          </div>
+          <div>
+            <div id="admMetricUsers" style="font-size: 22px; font-weight: 700; color: #0f172a; line-height: 1.1;">0</div>
+            <div style="font-size: 11.5px; color: #64748b; margin-top: 2px; font-weight: 500;">Registered Inspectors</div>
+          </div>
+        </div>
+
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 14px 18px; display: flex; align-items: center; gap: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
+          <div style="width: 40px; height: 40px; border-radius: 6px; background: #ecfdf5; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: #059669;">
+            <i data-lucide="check-circle-2" style="width: 20px; height: 20px;"></i>
+          </div>
+          <div>
+            <div id="admMetricVerified" style="font-size: 22px; font-weight: 700; color: #0f172a; line-height: 1.1;">0</div>
+            <div style="font-size: 11.5px; color: #64748b; margin-top: 2px; font-weight: 500;">Verified Accounts</div>
+          </div>
+        </div>
+
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 14px 18px; display: flex; align-items: center; gap: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
+          <div style="width: 40px; height: 40px; border-radius: 6px; background: #f5f3ff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: #7c3aed;">
+            <i data-lucide="file-text" style="width: 20px; height: 20px;"></i>
+          </div>
+          <div>
+            <div id="admMetricReports" style="font-size: 22px; font-weight: 700; color: #0f172a; line-height: 1.1;">0</div>
+            <div style="font-size: 11.5px; color: #64748b; margin-top: 2px; font-weight: 500;">Saved Reports</div>
+          </div>
+        </div>
+
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 14px 18px; display: flex; align-items: center; gap: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
+          <div style="width: 40px; height: 40px; border-radius: 6px; background: #fff7ed; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: #ea580c;">
+            <i data-lucide="alert-triangle" style="width: 20px; height: 20px;"></i>
+          </div>
+          <div>
+            <div id="admMetricDefects" style="font-size: 22px; font-weight: 700; color: #0f172a; line-height: 1.1;">0</div>
+            <div style="font-size: 11.5px; color: #64748b; margin-top: 2px; font-weight: 500;">Identified Defects</div>
+          </div>
+        </div>
       </div>
-    </footer>
+
+      <!-- Clean Minimal Table Panel -->
+      <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
+        <div style="padding: 12px 18px; background: #fafafa; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+          <div style="font-size: 13px; font-weight: 700; color: #1e293b; display: flex; align-items: center; gap: 8px;">
+            <i data-lucide="users" style="width: 15px; height: 15px; color: #2563eb;"></i>
+            <span>Registered Inspectors Directory</span>
+          </div>
+          <div style="font-size: 11.5px; color: #64748b; display: flex; align-items: center; gap: 5px;">
+            <i data-lucide="info" style="width: 13px; height: 13px; color: #3b82f6;"></i>
+            <span>Tip: Click any row to view complete inspector profile &amp; reports</span>
+          </div>
+        </div>
+        <div style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; min-width: 860px;" id="adminUsersTable">
+            <thead>
+              <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0;">
+                <th style="padding: 10px 14px; font-weight: 700; color: #475569; font-size: 11px; text-transform: uppercase;">Inspector</th>
+                <th style="padding: 10px 14px; font-weight: 700; color: #475569; font-size: 11px; text-transform: uppercase;">Email</th>
+                <th style="padding: 10px 14px; font-weight: 700; color: #475569; font-size: 11px; text-transform: uppercase;">Phone</th>
+                <th style="padding: 10px 14px; font-weight: 700; color: #475569; font-size: 11px; text-transform: uppercase;">Organization</th>
+                <th style="padding: 10px 14px; font-weight: 700; color: #475569; font-size: 11px; text-transform: uppercase;">Status</th>
+                <th style="padding: 10px 14px; font-weight: 700; color: #475569; font-size: 11px; text-transform: uppercase; text-align: center;">Reports</th>
+                <th style="padding: 10px 14px; font-weight: 700; color: #475569; font-size: 11px; text-transform: uppercase; text-align: center;">Defects</th>
+                <th style="padding: 10px 14px; font-weight: 700; color: #475569; font-size: 11px; text-transform: uppercase;">Registered</th>
+                <th style="padding: 10px 14px; font-weight: 700; color: #475569; font-size: 11px; text-transform: uppercase;">Last Active</th>
+                <th style="padding: 10px 14px; font-weight: 700; color: #475569; font-size: 11px; text-transform: uppercase; text-align: center;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="adminUsersTableBody">
+              <tr>
+                <td colspan="10" style="text-align: center; padding: 2.5rem; color: #64748b;">
+                  <span class="spinner" style="width: 14px; height: 14px; border-width: 2px; display: inline-block; margin-right: 6px;"></span> Loading inspectors list...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
 
     <!-- MODAL 1: SAVED REPORTS LIBRARY -->
     <div class="modal-layer" id="savedReportsModal" style="display: none;">
@@ -601,10 +926,16 @@
           </div>
         </div>
         <div class="modal-footer" style="justify-content: space-between;">
-          <button class="hip-btn" id="btnDeletePhoto" style="color: #dc3545;">
-            <i data-lucide="trash-2" style="width: 13px; height: 13px;"></i>
-            <span>Delete</span>
-          </button>
+          <div style="display: flex; gap: 8px;">
+            <button class="hip-btn" id="btnDeletePhoto" style="color: #dc3545;">
+              <i data-lucide="trash-2" style="width: 13px; height: 13px;"></i>
+              <span>Delete</span>
+            </button>
+            <button class="hip-btn" id="btnCropExistingPhoto" style="color: #2563eb; background: #eff6ff; border-color: #bfdbfe;">
+              <i data-lucide="crop" style="width: 13px; height: 13px;"></i>
+              <span>Crop / Rotate</span>
+            </button>
+          </div>
           <div style="display: flex; gap: 8px;">
             <button class="hip-btn" id="btnCancelPhotoModal">Cancel</button>
             <button class="hip-btn hip-btn-primary" id="btnSavePhotoCaption">Save Caption</button>
@@ -876,6 +1207,397 @@
       </div>
     </div>
 
+    <!-- MODAL 11: Admin User Detail & Reports Modal -->
+    <div class="modal-layer" id="adminUserModal" style="display: none; z-index: 10000;">
+      <div class="modal-box modal-box-lg" style="max-width: 1100px; width: 95%; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; padding: 0;">
+        <div class="modal-header" style="padding: 14px 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="width: 32px; height: 32px; border-radius: 6px; background: #eff6ff; display: flex; align-items: center; justify-content: center; color: #2563eb;">
+              <i data-lucide="user-check" style="width: 18px; height: 18px;"></i>
+            </div>
+            <div>
+              <span id="adminModalUserTitle" style="font-weight: 700; font-size: 14px; color: #0f172a;">Inspector Profile &amp; Reports</span>
+              <p style="margin: 2px 0 0 0; font-size: 11.5px; color: #64748b;">Comprehensive inspector details, contact information, and inspection reports portfolio</p>
+            </div>
+          </div>
+          <button class="btn-close" id="btnCloseAdminUserModal">&times;</button>
+        </div>
+
+        <div class="modal-body" style="padding: 18px 22px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 16px;">
+          <!-- Inspector Profile Identity & Contact Card -->
+          <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
+            <div style="display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin-bottom: 14px;">
+              <div style="display: flex; align-items: center; gap: 14px;">
+                <div id="admSummaryAvatar" style="width: 50px; height: 50px; border-radius: 50%; background: linear-gradient(135deg, #1e3a8a, #3b82f6); color: #ffffff; font-weight: 700; font-size: 18px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);">
+                  IN
+                </div>
+                <div>
+                  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <h3 id="admSummaryName" style="margin: 0; font-size: 16px; font-weight: 700; color: #0f172a;">—</h3>
+                    <span id="admSummaryRole" class="badge-role user">USER</span>
+                    <span id="admSummaryStatusPill" style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; border-radius: 12px; font-size: 11px; font-weight: 600;">
+                      <i data-lucide="check" style="width:10px;height:10px;"></i> Verified
+                    </span>
+                    <span id="admSummaryActiveBadge" style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; border-radius: 12px; font-size: 11px; font-weight: 600;">
+                      <i data-lucide="check" style="width:10px;height:10px;"></i> Active
+                    </span>
+                  </div>
+                  <div style="margin-top: 4px; font-size: 12px; color: #64748b; font-family: Consolas, monospace;" id="admSummaryEmail">—</div>
+                </div>
+              </div>
+              <div style="font-size: 11px; color: #94a3b8; font-family: Consolas, monospace; background: #f8fafc; padding: 4px 8px; border-radius: 4px; border: 1px solid #e2e8f0;">
+                ID: <span id="admSummaryId" style="color: #64748b;">—</span>
+              </div>
+            </div>
+
+            <!-- Detailed Grid Information -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 16px; font-size: 12px; padding-top: 12px; border-top: 1px solid #f1f5f9;">
+              <div><span style="color: #64748b; font-size: 11px;">Phone:</span> <strong id="admSummaryPhone" style="color: #1e293b; margin-left: 4px;">—</strong></div>
+              <div><span style="color: #64748b; font-size: 11px;">Organization:</span> <strong id="admSummaryOrg" style="color: #1e293b; margin-left: 4px;">—</strong></div>
+              <div><span style="color: #64748b; font-size: 11px;">Registered On:</span> <span id="admSummaryCreated" style="color: #1e293b; margin-left: 4px; font-weight: 500;">—</span></div>
+              <div><span style="color: #64748b; font-size: 11px;">Last Active:</span> <span id="admSummaryLastLogin" style="color: #1e293b; margin-left: 4px; font-weight: 500;">—</span></div>
+            </div>
+          </div>
+
+          <!-- 5 Rich Metric Summary Chips -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;">
+            <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+              <div style="width: 32px; height: 32px; border-radius: 6px; background: #eff6ff; display: flex; align-items: center; justify-content: center; color: #2563eb; flex-shrink: 0;">
+                <i data-lucide="file-text" style="width: 16px; height: 16px;"></i>
+              </div>
+              <div>
+                <div id="admStatRepCount" style="font-size: 16px; font-weight: 700; color: #0f172a; line-height: 1.1;">0</div>
+                <div style="font-size: 11px; color: #64748b;">Saved Reports</div>
+              </div>
+            </div>
+
+            <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+              <div style="width: 32px; height: 32px; border-radius: 6px; background: #f0fdf4; display: flex; align-items: center; justify-content: center; color: #16a34a; flex-shrink: 0;">
+                <i data-lucide="check-square" style="width: 16px; height: 16px;"></i>
+              </div>
+              <div>
+                <div id="admStatItemCount" style="font-size: 16px; font-weight: 700; color: #0f172a; line-height: 1.1;">0</div>
+                <div style="font-size: 11px; color: #64748b;">Audited Items</div>
+              </div>
+            </div>
+
+            <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+              <div style="width: 32px; height: 32px; border-radius: 6px; background: #fff7ed; display: flex; align-items: center; justify-content: center; color: #ea580c; flex-shrink: 0;">
+                <i data-lucide="alert-triangle" style="width: 16px; height: 16px;"></i>
+              </div>
+              <div>
+                <div id="admStatDefectCount" style="font-size: 16px; font-weight: 700; color: #ea580c; line-height: 1.1;">0</div>
+                <div style="font-size: 11px; color: #64748b;">Defects Logged</div>
+              </div>
+            </div>
+
+            <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+              <div style="width: 32px; height: 32px; border-radius: 6px; background: #fef2f2; display: flex; align-items: center; justify-content: center; color: #dc2626; flex-shrink: 0;">
+                <i data-lucide="alert-octagon" style="width: 16px; height: 16px;"></i>
+              </div>
+              <div>
+                <div id="admStatHazardCount" style="font-size: 16px; font-weight: 700; color: #dc2626; line-height: 1.1;">0</div>
+                <div style="font-size: 11px; color: #64748b;">Safety Hazards</div>
+              </div>
+            </div>
+
+            <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+              <div style="width: 32px; height: 32px; border-radius: 6px; background: #faf5ff; display: flex; align-items: center; justify-content: center; color: #9333ea; flex-shrink: 0;">
+                <i data-lucide="camera" style="width: 16px; height: 16px;"></i>
+              </div>
+              <div>
+                <div id="admStatPhotoCount" style="font-size: 16px; font-weight: 700; color: #9333ea; line-height: 1.1;">0</div>
+                <div style="font-size: 11px; color: #64748b;">Inspection Photos</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Reports created by this user -->
+          <div>
+            <div style="display: flex; align-items: center; justify-content: space-between; margin: 6px 0 10px 0;">
+              <h4 style="margin: 0; font-size: 13px; color: #0f172a; display: flex; align-items: center; gap: 6px;">
+                <i data-lucide="archive" style="width: 15px; height: 15px; color: #2563eb;"></i>
+                <span>Inspection Reports Portfolio (<span id="admUserReportsCount">0</span>)</span>
+              </h4>
+            </div>
+
+            <div style="max-height: 340px; overflow-y: auto; overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid #cbd5e1; border-radius: 6px; background: #ffffff;">
+              <table style="width: 100%; border-collapse: collapse; font-size: 11.5px; text-align: left; min-width: 820px;" id="adminUserReportsTable">
+                <thead>
+                  <tr style="background: #f8fafc; border-bottom: 2px solid #cbd5e1;">
+                    <th style="padding: 10px 12px; font-weight: 700; color: #334155; font-size: 11px; text-transform: uppercase;">Report File</th>
+                    <th style="padding: 10px 12px; font-weight: 700; color: #334155; font-size: 11px; text-transform: uppercase;">Client Name</th>
+                    <th style="padding: 10px 12px; font-weight: 700; color: #334155; font-size: 11px; text-transform: uppercase;">Property Address</th>
+                    <th style="padding: 10px 12px; font-weight: 700; color: #334155; font-size: 11px; text-transform: uppercase;">Date</th>
+                    <th style="padding: 10px 12px; font-weight: 700; color: #334155; font-size: 11px; text-transform: uppercase; text-align: center;">Items</th>
+                    <th style="padding: 10px 12px; font-weight: 700; color: #334155; font-size: 11px; text-transform: uppercase; text-align: center;">Defects</th>
+                    <th style="padding: 10px 12px; font-weight: 700; color: #334155; font-size: 11px; text-transform: uppercase; text-align: center;">Hazards</th>
+                    <th style="padding: 10px 12px; font-weight: 700; color: #334155; font-size: 11px; text-transform: uppercase; text-align: center;">Photos</th>
+                    <th style="padding: 10px 12px; font-weight: 700; color: #334155; font-size: 11px; text-transform: uppercase; text-align: center;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="adminUserReportsBody">
+                  <!-- Dynamically populated -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer" style="padding: 12px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
+          <button class="hip-btn" id="btnModalToggleActive" style="padding: 6px 14px; font-size: 12px; border-radius: 4px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+            <i data-lucide="user-x" style="width: 14px; height: 14px;"></i>
+            <span id="btnModalToggleActiveText">Deactivate Account</span>
+          </button>
+          <button class="hip-btn" id="btnCloseAdminUserModalBtn" style="padding: 6px 18px; font-weight: 600;">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 12: Admin Delete Inspector Confirmation Pop Card -->
+    <div class="modal-layer" id="adminDeleteUserModal" style="display: none; z-index: 10050;">
+      <div class="modal-box" style="max-width: 460px; width: 92%; border-radius: 8px; border: 1px solid #fecaca; box-shadow: 0 10px 25px -5px rgba(220, 38, 38, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1); padding: 0; overflow: hidden; background: #ffffff;">
+        <div style="background: #fff1f2; border-bottom: 1px solid #fee2e2; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="width: 34px; height: 34px; border-radius: 50%; background: #fee2e2; display: flex; align-items: center; justify-content: center; color: #dc2626; flex-shrink: 0;">
+              <i data-lucide="alert-triangle" style="width: 18px; height: 18px;"></i>
+            </div>
+            <div>
+              <h3 style="margin: 0; font-size: 14px; font-weight: 700; color: #991b1b;">Delete Inspector Account</h3>
+              <p style="margin: 1px 0 0 0; font-size: 11px; color: #b91c1c;">Confirmation required to prevent accidental loss</p>
+            </div>
+          </div>
+          <button class="btn-close" id="btnCloseDeleteUserModal" style="color: #991b1b;">&times;</button>
+        </div>
+
+        <div style="padding: 18px 20px;">
+          <p style="margin: 0 0 14px 0; font-size: 12.5px; color: #334155; line-height: 1.5;">
+            Are you sure you want to permanently delete this inspector account?
+          </p>
+
+          <!-- Inspector target summary card -->
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px 14px; margin-bottom: 14px; font-size: 12px;">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+              <div id="delConfirmAvatar" style="width: 32px; height: 32px; border-radius: 50%; background: #e0e7ff; color: #4338ca; font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0;">IN</div>
+              <div style="min-width: 0; flex: 1;">
+                <div id="delConfirmName" style="font-weight: 700; color: #0f172a; font-size: 13px;">—</div>
+                <div id="delConfirmEmail" style="color: #64748b; font-size: 11.5px; font-family: Consolas, monospace; overflow: hidden; text-overflow: ellipsis;">—</div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 14px; border-top: 1px solid #f1f5f9; padding-top: 8px; font-size: 11.5px; color: #64748b;">
+              <div>Saved Reports: <strong id="delConfirmReports" style="color: #0f172a;">0</strong></div>
+              <div>Defects: <strong id="delConfirmDefects" style="color: #ea580c;">0</strong></div>
+            </div>
+          </div>
+
+          <div style="background: #fff7ed; border-left: 3px solid #f97316; padding: 10px 12px; border-radius: 4px; font-size: 11.5px; color: #9a3412; line-height: 1.4;">
+            <strong>Warning:</strong> All saved inspections, defect records, and uploaded photos associated with this inspector will be permanently erased.
+          </div>
+        </div>
+
+        <div style="padding: 12px 18px; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 8px;">
+          <button class="hip-btn" id="btnCancelDeleteUser" style="background: #ffffff; color: #475569; border: 1px solid #cbd5e1; padding: 6px 14px; font-size: 12px; border-radius: 4px; font-weight: 600; cursor: pointer;">Cancel</button>
+          <button class="hip-btn" id="btnConfirmDeleteUser" style="background: #dc2626; color: #ffffff; border: 1px solid #b91c1c; padding: 6px 14px; font-size: 12px; border-radius: 4px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+            <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
+            <span>Delete Account</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 13: Admin Deactivate / Activate Confirmation Pop Card -->
+    <div class="modal-layer" id="adminToggleStatusModal" style="display: none; z-index: 10060;">
+      <div class="modal-box" style="max-width: 480px; width: 92%; border-radius: 8px; border: 1px solid #cbd5e1; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08); padding: 0; overflow: hidden; background: #ffffff;">
+        <div id="toggleModalHeader" style="background: #fffbeb; border-bottom: 1px solid #fef3c7; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div id="toggleModalIconBox" style="width: 34px; height: 34px; border-radius: 50%; background: #fef3c7; display: flex; align-items: center; justify-content: center; color: #d97706; flex-shrink: 0;">
+              <i id="toggleModalIcon" data-lucide="user-x" style="width: 18px; height: 18px;"></i>
+            </div>
+            <div>
+              <h3 id="toggleModalTitle" style="margin: 0; font-size: 14px; font-weight: 700; color: #92400e;">Deactivate Inspector Account</h3>
+              <p id="toggleModalSubtitle" style="margin: 1px 0 0 0; font-size: 11px; color: #b45309;">Blocks login access while preserving all records &amp; reports</p>
+            </div>
+          </div>
+          <button class="btn-close" id="btnCloseToggleStatusModal">&times;</button>
+        </div>
+
+        <div style="padding: 18px 20px;">
+          <p id="toggleModalPrompt" style="margin: 0 0 14px 0; font-size: 12.5px; color: #334155; line-height: 1.5;">
+            Are you sure you want to deactivate this inspector account?
+          </p>
+
+          <!-- Inspector Target Summary -->
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px 14px; margin-bottom: 14px; font-size: 12px;">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+              <div id="toggleConfirmAvatar" style="width: 32px; height: 32px; border-radius: 50%; background: #e0e7ff; color: #4338ca; font-weight: 700; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0;">IN</div>
+              <div style="min-width: 0; flex: 1;">
+                <div id="toggleConfirmName" style="font-weight: 700; color: #0f172a; font-size: 13px;">—</div>
+                <div id="toggleConfirmEmail" style="color: #64748b; font-size: 11.5px; font-family: Consolas, monospace; overflow: hidden; text-overflow: ellipsis;">—</div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 14px; border-top: 1px solid #f1f5f9; padding-top: 8px; font-size: 11.5px; color: #64748b;">
+              <div>Saved Reports: <strong id="toggleConfirmReports" style="color: #0f172a;">0</strong></div>
+              <div>Defects: <strong id="toggleConfirmDefects" style="color: #ea580c;">0</strong></div>
+            </div>
+          </div>
+
+          <div id="toggleModalNote" style="background: #f0fdf4; border-left: 3px solid #16a34a; padding: 10px 12px; border-radius: 4px; font-size: 11.5px; color: #166534; line-height: 1.4;">
+            <strong>Data Safe:</strong> Deactivating prevents the inspector from signing in, but all existing reports, clients, photos, and defect records remain 100% saved and accessible to the admin.
+          </div>
+        </div>
+
+        <div style="padding: 12px 18px; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 8px;">
+          <button class="hip-btn" id="btnCancelToggleStatus" style="background: #ffffff; color: #475569; border: 1px solid #cbd5e1; padding: 6px 14px; font-size: 12px; border-radius: 4px; font-weight: 600; cursor: pointer;">Cancel</button>
+          <button class="hip-btn" id="btnConfirmToggleStatus" style="background: #d97706; color: #ffffff; border: 1px solid #b45309; padding: 6px 14px; font-size: 12px; border-radius: 4px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+            <i id="btnConfirmToggleStatusIcon" data-lucide="user-x" style="width: 14px; height: 14px;"></i>
+            <span id="btnConfirmToggleStatusText">Deactivate Account</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL 14: Live Camera & Photo Crop Modal -->
+    <div class="modal-layer" id="liveCameraModal" style="display: none; z-index: 10070;">
+      <div class="modal-box modal-camera-box" style="max-width: 680px; width: 95%; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; padding: 0; background: #0f172a; color: #f8fafc; border: 1px solid #334155; border-radius: 10px; box-shadow: 0 20px 40px rgba(0,0,0,0.5);">
+        
+        <!-- Header -->
+        <div style="padding: 12px 18px; background: #1e293b; border-bottom: 1px solid #334155; display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="width: 32px; height: 32px; border-radius: 6px; background: rgba(59, 130, 246, 0.2); color: #60a5fa; display: flex; align-items: center; justify-content: center;">
+              <i data-lucide="camera" style="width: 17px; height: 17px;"></i>
+            </div>
+            <div>
+              <h3 id="liveCameraModalTitle" style="margin: 0; font-size: 14px; font-weight: 700; color: #ffffff;">Live Inspection Camera</h3>
+              <p id="liveCameraModalSubtitle" style="margin: 1px 0 0 0; font-size: 11px; color: #94a3b8;">Capture and crop defect photo directly</p>
+            </div>
+          </div>
+          <button class="btn-close" id="btnCloseLiveCameraModal" style="color: #cbd5e1; font-size: 20px;">&times;</button>
+        </div>
+
+        <!-- Body: Step 1 Camera Viewfinder OR Step 2 Crop Editor -->
+        <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; position: relative; background: #090d16;">
+          
+          <!-- STEP 1: Live Camera Viewfinder -->
+          <div id="cameraViewfinderPane" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 14px; min-height: 380px; position: relative;">
+            
+            <!-- Video Viewfinder Container -->
+            <div id="cameraVideoWrapper" style="position: relative; width: 100%; max-width: 580px; aspect-ratio: 4/3; background: #000000; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center;">
+              <video id="liveCameraVideo" autoplay playsinline muted style="width: 100%; height: 100%; object-fit: cover;"></video>
+              
+              <!-- Viewfinder Target Reticle -->
+              <div class="camera-target-reticle" style="position: absolute; inset: 20px; border: 2px dashed rgba(255,255,255,0.25); border-radius: 6px; pointer-events: none;">
+                <div style="position: absolute; top: -2px; left: -2px; width: 22px; height: 22px; border-top: 3px solid #3b82f6; border-left: 3px solid #3b82f6;"></div>
+                <div style="position: absolute; top: -2px; right: -2px; width: 22px; height: 22px; border-top: 3px solid #3b82f6; border-right: 3px solid #3b82f6;"></div>
+                <div style="position: absolute; bottom: -2px; left: -2px; width: 22px; height: 22px; border-bottom: 3px solid #3b82f6; border-left: 3px solid #3b82f6;"></div>
+                <div style="position: absolute; bottom: -2px; right: -2px; width: 22px; height: 22px; border-bottom: 3px solid #3b82f6; border-right: 3px solid #3b82f6;"></div>
+              </div>
+
+              <!-- Camera Loading Spinner / Error fallback -->
+              <div id="cameraLoadingIndicator" style="position: absolute; inset: 0; background: rgba(15, 23, 42, 0.88); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; z-index: 5; text-align: center; padding: 20px;">
+                <span class="spinner" style="width: 28px; height: 28px; border-width: 3px; border-top-color: #3b82f6;"></span>
+                <span id="cameraStatusMsg" style="font-size: 13px; color: #94a3b8;">Connecting to camera stream...</span>
+              </div>
+
+              <!-- Flip Camera button overlay on top-right -->
+              <button id="btnFlipCamera" type="button" style="position: absolute; top: 12px; right: 12px; z-index: 10; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,0.2); color: #ffffff; padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                <i data-lucide="refresh-cw" style="width: 12px; height: 12px;"></i>
+                <span>Flip Camera</span>
+              </button>
+            </div>
+
+            <!-- Shutter & Controls Row -->
+            <div style="width: 100%; max-width: 580px; margin-top: 14px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px;">
+              
+              <!-- Left: From Gallery / File -->
+              <button id="btnCameraUploadFallback" type="button" style="background: rgba(51, 65, 85, 0.8); border: 1px solid #475569; color: #e2e8f0; padding: 8px 14px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;" title="Pick image from device gallery to crop">
+                <i data-lucide="image" style="width: 14px; height: 14px;"></i>
+                <span>Gallery</span>
+              </button>
+
+              <!-- Center: Tactile Shutter Button -->
+              <button id="btnShutterCapture" type="button" class="btn-shutter" title="Snap Photo" style="width: 64px; height: 64px; border-radius: 50%; background: #ffffff; border: 4px solid #3b82f6; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 0 16px rgba(59, 130, 246, 0.6); transition: transform 0.1s ease, box-shadow 0.1s ease;">
+                <span style="width: 48px; height: 48px; border-radius: 50%; background: #ef4444; border: 2px solid #ffffff; display: block;"></span>
+              </button>
+
+              <!-- Right: Native Device Camera Fallback (opens phone camera app) -->
+              <button id="btnCameraNativeApp" type="button" style="background: rgba(51, 65, 85, 0.8); border: 1px solid #475569; color: #e2e8f0; padding: 8px 14px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;" title="Open device native camera app">
+                <i data-lucide="camera" style="width: 14px; height: 14px;"></i>
+                <span>Device App</span>
+              </button>
+            </div>
+
+            <!-- Hidden native file/camera inputs -->
+            <input type="file" id="liveCameraFileInput" accept="image/*" style="display: none;">
+            <input type="file" id="liveCameraNativeAppInput" accept="image/*" capture="environment" style="display: none;">
+          </div>
+
+
+          <!-- STEP 2: Interactive Crop & Orientation Editor -->
+          <div id="cameraCropPane" style="display: none; flex-direction: column; padding: 14px; align-items: center;">
+            
+            <!-- Crop Toolbar (Aspect Ratio, Rotate, Zoom) -->
+            <div style="width: 100%; max-width: 580px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; background: #1e293b; padding: 8px 12px; border-radius: 6px; border: 1px solid #334155;">
+              
+              <!-- Aspect ratio presets -->
+              <div style="display: flex; align-items: center; gap: 5px;">
+                <span style="font-size: 11px; color: #94a3b8; font-weight: 600; text-transform: uppercase;">Ratio:</span>
+                <button type="button" class="btn-crop-ratio active" data-ratio="4/3">4:3</button>
+                <button type="button" class="btn-crop-ratio" data-ratio="16/9">16:9</button>
+                <button type="button" class="btn-crop-ratio" data-ratio="1/1">1:1</button>
+                <button type="button" class="btn-crop-ratio" data-ratio="free">Free</button>
+              </div>
+
+              <!-- Rotate & Reset Tools -->
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <button type="button" id="btnRotateCropCcw" class="btn-crop-tool" title="Rotate Counter-Clockwise 90°">
+                  <i data-lucide="rotate-ccw" style="width: 13px; height: 13px;"></i>
+                  <span>-90°</span>
+                </button>
+                <button type="button" id="btnRotateCropCw" class="btn-crop-tool" title="Rotate Clockwise 90°">
+                  <i data-lucide="rotate-cw" style="width: 13px; height: 13px;"></i>
+                  <span>+90°</span>
+                </button>
+                <button type="button" id="btnResetCrop" class="btn-crop-tool" title="Reset crop to full view">
+                  <i data-lucide="maximize" style="width: 13px; height: 13px;"></i>
+                  <span>Reset</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Crop Canvas Container -->
+            <div id="cropCanvasWrapper" style="position: relative; width: 100%; max-width: 580px; height: 380px; max-height: 50vh; background: #000000; border-radius: 6px; overflow: hidden; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.5); user-select: none; touch-action: none;">
+              <canvas id="cropCanvas" style="display: block; max-width: 100%; max-height: 100%; cursor: crosshair;"></canvas>
+            </div>
+
+            <!-- Optional Photo Caption input right during crop -->
+            <div style="width: 100%; max-width: 580px; margin-top: 10px;">
+              <input type="text" id="livePhotoCaptionInput" placeholder="Optional defect note or caption for this photo..." style="width: 100%; background: #1e293b; border: 1px solid #334155; color: #f8fafc; padding: 8px 12px; font-size: 12px; border-radius: 5px; outline: none;">
+            </div>
+
+          </div>
+
+        </div>
+
+        <!-- Footer Actions -->
+        <div style="padding: 12px 18px; background: #1e293b; border-top: 1px solid #334155; display: flex; align-items: center; justify-content: space-between;">
+          <button type="button" id="btnRetakeFromCrop" style="display: none; background: #334155; color: #f8fafc; border: 1px solid #475569; padding: 7px 14px; font-size: 12px; border-radius: 4px; font-weight: 600; cursor: pointer; align-items: center; gap: 6px;">
+            <i data-lucide="camera" style="width: 13px; height: 13px;"></i>
+            <span>Retake</span>
+          </button>
+          
+          <button type="button" id="btnCancelLiveCamera" style="background: transparent; color: #94a3b8; border: 1px solid #475569; padding: 7px 14px; font-size: 12px; border-radius: 4px; font-weight: 600; cursor: pointer;">
+            Cancel
+          </button>
+
+          <button type="button" id="btnConfirmPhotoCrop" style="display: none; background: #2563eb; color: #ffffff; border: 1px solid #1d4ed8; padding: 7px 18px; font-size: 12px; border-radius: 4px; font-weight: 600; cursor: pointer; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(37,99,235,0.4);">
+            <i data-lucide="check" style="width: 14px; height: 14px;"></i>
+            <span>Add Photo to Item</span>
+          </button>
+        </div>
+
+      </div>
+    </div>
+
     <!-- Toast Notification -->
     <div class="toast" id="toastMessage"></div>
 
@@ -891,7 +1613,7 @@
       }
     } catch(e) {}
   </script>
-  <script src="config.js?v=hip-print-pdf-v1"></script>
-  <script src="app.js?v=hip-print-pdf-v1"></script>
+  <script src="config.js?v=hip-livecam-v1"></script>
+  <script src="app.js?v=hip-livecam-v1"></script>
 </body>
 </html>

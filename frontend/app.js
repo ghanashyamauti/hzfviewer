@@ -11,6 +11,8 @@
   console.log("app.js build 2026-10-29T10:00:00-persist");
 
   const State = {
+    authToken: localStorage.getItem('hzf_auth_token') || null,
+    currentUser: null,
     isInspectionActive: false,
     activeReportId: null,
     fileName: "Untitled_Inspection.hzf",
@@ -381,6 +383,17 @@
     return base ? `${base.replace(/\/+$/, '')}${endpoint}` : endpoint;
   }
 
+  // HTML Escaping Helper to prevent XSS and undefined ReferenceErrors
+  function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
   // Toast Notification Helper
   function showToast(msg) {
     const t = document.getElementById('toastMessage');
@@ -390,17 +403,1035 @@
     setTimeout(() => { t.style.display = 'none'; }, 3000);
   }
 
+  // Transparent Auth-intercepting Fetch Wrapper
+  const _nativeFetch = window.fetch.bind(window);
+  window.fetch = async function (resource, init = {}) {
+    const url = (typeof resource === 'string') ? resource : (resource && resource.url ? resource.url : '');
+    const isApi = (typeof url === 'string') && url.includes('/api/');
+    if (isApi) {
+      const token = State.authToken || localStorage.getItem('hzf_auth_token');
+      if (token) {
+        init = init || {};
+        const headers = new Headers(init.headers || {});
+        if (!headers.has('Authorization')) {
+          headers.set('Authorization', `Bearer ${token}`);
+        }
+        init.headers = headers;
+      }
+    }
+    const response = await _nativeFetch(resource, init);
+    if (response.status === 401 && isApi && !url.includes('/api/auth/login') && !url.includes('/api/auth/register') && !url.includes('/api/auth/verify-otp')) {
+      if (State.authToken) {
+        console.warn("Auth token invalid or expired. Logging out.");
+        handleAuthLogout(false, "Your session has expired. Please log in again.");
+      }
+    }
+    return response;
+  };
+
+  // ==========================================================================
+  // AUTHENTICATION & ACCESS CONTROL
+  // ==========================================================================
+  let pendingAuthEmail = "";
+  let adminUsersCache = [];
+
+  function showAuthAlert(msg, type = "error") {
+    const alertBox = document.getElementById("authAlert");
+    if (!alertBox) return;
+    if (!msg) {
+      alertBox.style.display = "none";
+      alertBox.textContent = "";
+      alertBox.className = "auth-alert";
+      return;
+    }
+    alertBox.textContent = msg;
+    alertBox.className = `auth-alert ${type}`;
+    alertBox.style.display = "block";
+  }
+
+  function setAuthTab(tab) {
+    const tabLogin = document.getElementById("tabAuthLogin");
+    const tabReg = document.getElementById("tabAuthRegister");
+    const authTabsBar = document.getElementById("authTabsBar");
+    const formLogin = document.getElementById("formAuthLogin");
+    const formReg = document.getElementById("formAuthRegister");
+    const formOtp = document.getElementById("formAuthOtp");
+    const formForgot = document.getElementById("formAuthForgotPassword");
+    const formReset = document.getElementById("formAuthResetPassword");
+
+    showAuthAlert("");
+
+    // Hide all forms initially
+    if (formLogin) formLogin.style.display = "none";
+    if (formReg) formReg.style.display = "none";
+    if (formOtp) formOtp.style.display = "none";
+    if (formForgot) formForgot.style.display = "none";
+    if (formReset) formReset.style.display = "none";
+
+    if (tab === "register") {
+      if (authTabsBar) authTabsBar.style.display = "flex";
+      tabLogin?.classList.remove("active");
+      tabReg?.classList.add("active");
+      if (formReg) formReg.style.display = "flex";
+    } else if (tab === "otp") {
+      if (authTabsBar) authTabsBar.style.display = "none";
+      tabLogin?.classList.remove("active");
+      tabReg?.classList.remove("active");
+      if (formOtp) formOtp.style.display = "flex";
+      const targetEl = document.getElementById("otpTargetEmail");
+      if (targetEl) targetEl.textContent = pendingAuthEmail || "your email";
+      const codeInput = document.getElementById("otpCodeInput");
+      if (codeInput) {
+        codeInput.value = "";
+        setTimeout(() => codeInput.focus(), 60);
+      }
+    } else if (tab === "forgot") {
+      if (authTabsBar) authTabsBar.style.display = "none";
+      tabLogin?.classList.remove("active");
+      tabReg?.classList.remove("active");
+      if (formForgot) formForgot.style.display = "flex";
+      const forgotEmailInput = document.getElementById("forgotEmail");
+      if (forgotEmailInput) {
+        if (pendingAuthEmail) forgotEmailInput.value = pendingAuthEmail;
+        setTimeout(() => forgotEmailInput.focus(), 60);
+      }
+    } else if (tab === "reset-password") {
+      if (authTabsBar) authTabsBar.style.display = "none";
+      tabLogin?.classList.remove("active");
+      tabReg?.classList.remove("active");
+      if (formReset) formReset.style.display = "flex";
+      const targetEl = document.getElementById("resetTargetEmail");
+      if (targetEl) targetEl.textContent = pendingAuthEmail || "your email";
+      const resetCodeInput = document.getElementById("resetOtpCode");
+      if (resetCodeInput) {
+        resetCodeInput.value = "";
+        setTimeout(() => resetCodeInput.focus(), 60);
+      }
+    } else {
+      // Default: login
+      if (authTabsBar) authTabsBar.style.display = "flex";
+      tabLogin?.classList.add("active");
+      tabReg?.classList.remove("active");
+      if (formLogin) formLogin.style.display = "flex";
+    }
+
+    if (window.lucide) {
+      try { lucide.createIcons(); } catch (e) {}
+    }
+  }
+
+  function showAuthScreen(tab = "login", alertMsg = "", alertType = "error") {
+    document.body.classList.add("auth-mode-active");
+    const authOverlay = document.getElementById("authScreen");
+    if (authOverlay) authOverlay.style.display = "flex";
+    setAuthTab(tab);
+    if (alertMsg) showAuthAlert(alertMsg, alertType);
+    if (window.lucide) lucide.createIcons();
+  }
+
+  function hideAuthScreen() {
+    document.body.classList.remove("auth-mode-active");
+    const authOverlay = document.getElementById("authScreen");
+    if (authOverlay) authOverlay.style.display = "none";
+    showAuthAlert("");
+    if (window.lucide) lucide.createIcons();
+  }
+
+  function updateUserToolbar(user) {
+    const userPill = document.getElementById("toolbarUserPill");
+    const nameEl = document.getElementById("navUserName");
+    const roleBadge = document.getElementById("navUserRoleBadge");
+    const adminBtn = document.getElementById("btnNavAdmin");
+    const btnOpenExisting = document.getElementById("btnOpenExisting");
+    const btnStartNew = document.getElementById("btnStartNewInspection");
+    const btnSavedReports = document.getElementById("btnOpenSavedReports");
+    const brandTitle = document.getElementById("brandTitleText");
+    const divider = document.getElementById("toolbarDividerNav");
+
+    if (user) {
+      const isAdmin = user.role === "admin";
+      if (userPill) userPill.style.display = "flex";
+      if (nameEl) nameEl.textContent = user.name || user.email.split("@")[0];
+      if (roleBadge) {
+        roleBadge.textContent = isAdmin ? "Admin" : "Inspector";
+        roleBadge.className = `badge-role ${isAdmin ? "admin" : "user"}`;
+      }
+
+      if (isAdmin) {
+        // For Admin: keep toolbar clean and dedicated - no inspector buttons, no redundant admin button
+        if (adminBtn) adminBtn.style.display = "none";
+        if (btnOpenExisting) btnOpenExisting.style.display = "none";
+        if (btnStartNew) btnStartNew.style.display = "none";
+        if (btnSavedReports) btnSavedReports.style.display = "none";
+        if (divider) divider.style.display = "none";
+        if (brandTitle) brandTitle.textContent = "HIP Studio Admin";
+      } else {
+        // For normal Inspectors: show standard inspection tools
+        if (adminBtn) adminBtn.style.display = "none";
+        if (btnOpenExisting) btnOpenExisting.style.display = "inline-flex";
+        if (btnStartNew) btnStartNew.style.display = "inline-flex";
+        if (btnSavedReports) btnSavedReports.style.display = "inline-flex";
+        if (divider) divider.style.display = "block";
+        if (brandTitle) brandTitle.textContent = "HIP Studio";
+      }
+    } else {
+      if (userPill) userPill.style.display = "none";
+      if (adminBtn) adminBtn.style.display = "none";
+      if (brandTitle) brandTitle.textContent = "HIP Studio";
+    }
+    if (window.lucide) {
+      try { lucide.createIcons(); } catch (e) {}
+    }
+  }
+
+  async function checkAuthSession() {
+    const token = State.authToken || localStorage.getItem("hzf_auth_token");
+    if (!token) {
+      showAuthScreen("login");
+      return false;
+    }
+    try {
+      const resp = await _nativeFetch(apiUrl("/api/auth/me"), {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.success && data.user) {
+          State.currentUser = data.user;
+          State.authToken = token;
+          localStorage.setItem("hzf_user_info", JSON.stringify(data.user));
+          updateUserToolbar(data.user);
+          hideAuthScreen();
+          if (data.user.role === 'admin') {
+            openAdminPanel();
+          } else {
+            closeAdminPanel();
+            refreshSavedReportsCount();
+          }
+          return true;
+        }
+      }
+      handleAuthLogout(false, "Session invalid or expired. Please sign in.");
+      return false;
+    } catch (err) {
+      console.warn("Auth check network warning:", err);
+      const cached = localStorage.getItem("hzf_user_info");
+      if (cached) {
+        try {
+          State.currentUser = JSON.parse(cached);
+          updateUserToolbar(State.currentUser);
+          hideAuthScreen();
+          if (State.currentUser && State.currentUser.role === 'admin') {
+            openAdminPanel();
+          } else {
+            closeAdminPanel();
+            refreshSavedReportsCount();
+          }
+          return true;
+        } catch (_) {}
+      }
+      showAuthScreen("login");
+      return false;
+    }
+  }
+
+  function handleAuthLogout(confirmWithUser = true, message = "") {
+    if (confirmWithUser) {
+      if (!confirm("Are you sure you want to log out of HZF Inspector Studio?")) return;
+    }
+    localStorage.removeItem("hzf_auth_token");
+    localStorage.removeItem("hzf_user_info");
+    State.authToken = null;
+    State.currentUser = null;
+    updateUserToolbar(null);
+    closeAdminPanel();
+    showAuthScreen("login", message || "You have been logged out.", "info");
+    showToast(message || "Logged out successfully");
+  }
+
+  // ==========================================================================
+  // ADMIN CONTROL CENTER
+  // ==========================================================================
+  function openAdminPanel() {
+    if (!State.currentUser || State.currentUser.role !== "admin") {
+      showToast("Access restricted: Administrator privileges required.");
+      return;
+    }
+    const welcome = document.getElementById("welcomeScreen");
+    const workspace = document.getElementById("activeWorkspace");
+    const admin = document.getElementById("adminScreen");
+    const btnAdminBack = document.getElementById("btnAdminBackToDash");
+    const navTabs = document.getElementById("navCenterTabs");
+    const exportGrp = document.getElementById("exportGroup");
+
+    State.isInspectionActive = false;
+    document.body.classList.remove('workspace-active');
+
+    if (welcome) welcome.style.display = "none";
+    if (workspace) workspace.style.display = "none";
+    if (btnAdminBack) btnAdminBack.style.display = "none";
+    if (navTabs) navTabs.style.display = "none";
+    if (exportGrp) exportGrp.style.display = "none";
+    if (admin) admin.style.display = "flex";
+
+    loadAdminDashboard();
+    if (window.lucide) lucide.createIcons();
+  }
+
+  function closeAdminPanel() {
+    const admin = document.getElementById("adminScreen");
+    if (admin) admin.style.display = "none";
+
+    const welcome = document.getElementById("welcomeScreen");
+    const workspace = document.getElementById("activeWorkspace");
+    const btnAdminBack = document.getElementById("btnAdminBackToDash");
+    const isAdmin = State.currentUser && State.currentUser.role === "admin";
+
+    if (State.isInspectionActive) {
+      if (workspace) workspace.style.display = "flex";
+      if (welcome) welcome.style.display = "none";
+      if (isAdmin && btnAdminBack) btnAdminBack.style.display = "inline-flex";
+    } else {
+      if (isAdmin) {
+        if (admin) admin.style.display = "flex";
+        if (welcome) welcome.style.display = "none";
+      } else {
+        if (welcome) welcome.style.display = "flex";
+        if (workspace) workspace.style.display = "none";
+      }
+    }
+  }
+
+  async function loadAdminDashboard() {
+    const tbody = document.getElementById("adminUsersTableBody");
+    const token = State.authToken || localStorage.getItem("hzf_auth_token");
+    try {
+      const resp = await fetch(apiUrl("/api/admin/overview"), {
+        headers: token ? { "Authorization": `Bearer ${token}` } : {}
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.success) {
+          if (data.metrics) {
+            const m = data.metrics;
+            const uEl = document.getElementById("admMetricUsers");
+            const vEl = document.getElementById("admMetricVerified");
+            const rEl = document.getElementById("admMetricReports");
+            const dEl = document.getElementById("admMetricDefects");
+            if (uEl) uEl.textContent = m.totalUsers ?? 0;
+            if (vEl) vEl.textContent = m.verifiedUsers ?? 0;
+            if (rEl) rEl.textContent = m.totalReports ?? 0;
+            if (dEl) dEl.textContent = m.totalDefects ?? 0;
+          }
+          if (Array.isArray(data.users)) {
+            adminUsersCache = data.users;
+            renderAdminUsersTable(adminUsersCache);
+            return;
+          }
+        }
+      }
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; padding: 2rem; color: #dc2626;">Unable to load inspector records. Please click Refresh.</td></tr>`;
+      }
+    } catch (err) {
+      console.error("Admin dashboard fetch error:", err);
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; padding: 2rem; color: #dc2626;">Error: ${escapeHtml(err.message)}</td></tr>`;
+      }
+      showToast("Error loading admin dashboard: " + err.message);
+    }
+  }
+
+  let pendingDeleteUser = null;
+  let pendingToggleUser = null;
+  let wasAdminUserModalOpenForToggle = false;
+  let wasAdminUserModalOpenForDelete = false;
+
+  function openDeleteConfirmModal(user) {
+    if (!user) return;
+    pendingDeleteUser = user;
+    const modal = document.getElementById("adminDeleteUserModal");
+    if (!modal) return;
+
+    // Immediately display the modal
+    modal.style.display = "flex";
+
+    const userModal = document.getElementById("adminUserModal");
+    if (userModal && userModal.style.display !== "none") {
+      wasAdminUserModalOpenForDelete = true;
+      userModal.style.display = "none";
+    } else {
+      wasAdminUserModalOpenForDelete = false;
+    }
+
+    try {
+      const avatarEl = document.getElementById("delConfirmAvatar");
+      const nameEl = document.getElementById("delConfirmName");
+      const emailEl = document.getElementById("delConfirmEmail");
+      const repEl = document.getElementById("delConfirmReports");
+      const defEl = document.getElementById("delConfirmDefects");
+
+      const name = user.name || "Inspector";
+      const initials = name.split(" ").filter(Boolean).map(w => w[0]).slice(0, 2).join("").toUpperCase() || "IN";
+      if (avatarEl) avatarEl.textContent = initials;
+      if (nameEl) nameEl.textContent = name;
+      if (emailEl) emailEl.textContent = user.email || "—";
+      if (repEl) repEl.textContent = user.reportsCount ?? user.reports_count ?? 0;
+      if (defEl) defEl.textContent = user.totalDefects ?? user.total_defects ?? 0;
+
+      if (window.lucide) {
+        try { lucide.createIcons(); } catch (e) {}
+      }
+    } catch (err) {
+      console.error("Error setting delete modal data:", err);
+    }
+  }
+
+  function hideDeleteConfirmModal() {
+    pendingDeleteUser = null;
+    const modal = document.getElementById("adminDeleteUserModal");
+    if (modal) modal.style.display = "none";
+    if (wasAdminUserModalOpenForDelete) {
+      const userModal = document.getElementById("adminUserModal");
+      if (userModal) userModal.style.display = "flex";
+      wasAdminUserModalOpenForDelete = false;
+    }
+  }
+
+  function openToggleStatusModal(user) {
+    if (!user) return;
+    pendingToggleUser = user;
+    const modal = document.getElementById("adminToggleStatusModal");
+    if (!modal) return;
+
+    // Immediately display the modal
+    modal.style.display = "flex";
+
+    const userModal = document.getElementById("adminUserModal");
+    if (userModal && userModal.style.display !== "none") {
+      wasAdminUserModalOpenForToggle = true;
+      userModal.style.display = "none";
+    } else {
+      wasAdminUserModalOpenForToggle = false;
+    }
+
+    try {
+      const isActive = (user.isActive !== undefined) ? !!user.isActive : (user.is_active !== undefined ? !!user.is_active : true);
+      const header = document.getElementById("toggleModalHeader");
+      const iconBox = document.getElementById("toggleModalIconBox");
+      const title = document.getElementById("toggleModalTitle");
+      const subtitle = document.getElementById("toggleModalSubtitle");
+      const prompt = document.getElementById("toggleModalPrompt");
+      const note = document.getElementById("toggleModalNote");
+      const avatar = document.getElementById("toggleConfirmAvatar");
+      const name = document.getElementById("toggleConfirmName");
+      const email = document.getElementById("toggleConfirmEmail");
+      const reports = document.getElementById("toggleConfirmReports");
+      const defects = document.getElementById("toggleConfirmDefects");
+      const confirmBtn = document.getElementById("btnConfirmToggleStatus");
+
+      const uName = user.name || "Inspector";
+      const initials = uName.split(" ").filter(Boolean).map(w => w[0]).slice(0, 2).join("").toUpperCase() || "IN";
+      if (avatar) avatar.textContent = initials;
+      if (name) name.textContent = uName;
+      if (email) email.textContent = user.email || "—";
+      if (reports) reports.textContent = user.reportsCount ?? user.reports_count ?? 0;
+      if (defects) defects.textContent = user.totalDefects ?? user.total_defects ?? 0;
+
+      if (isActive) {
+        // Prompt to DEACTIVATE
+        if (header) { header.style.background = "#fffbeb"; header.style.borderBottomColor = "#fef3c7"; }
+        if (iconBox) {
+          iconBox.style.background = "#fef3c7";
+          iconBox.style.color = "#d97706";
+          iconBox.innerHTML = `<i data-lucide="user-x" style="width: 18px; height: 18px;"></i>`;
+        }
+        if (title) { title.textContent = "Deactivate Inspector Account"; title.style.color = "#92400e"; }
+        if (subtitle) { subtitle.textContent = "Blocks login access while preserving all records & reports"; subtitle.style.color = "#b45309"; }
+        if (prompt) prompt.textContent = `Are you sure you want to deactivate "${uName}"? The inspector will not be able to log in, but all existing reports, clients, photos, and defect records will remain completely preserved and visible to the admin.`;
+        if (note) {
+          note.style.background = "#f0fdf4";
+          note.style.borderLeftColor = "#16a34a";
+          note.style.color = "#166534";
+          note.innerHTML = `<strong>Data Safe:</strong> All past inspection reports and defect logs remain 100% saved and accessible in the system.`;
+        }
+        if (confirmBtn) {
+          confirmBtn.style.background = "#d97706";
+          confirmBtn.style.borderColor = "#b45309";
+          confirmBtn.innerHTML = `<i data-lucide="user-x" style="width: 14px; height: 14px;"></i> <span id="btnConfirmToggleStatusText">Deactivate Account</span>`;
+        }
+      } else {
+        // Prompt to ACTIVATE
+        if (header) { header.style.background = "#ecfdf5"; header.style.borderBottomColor = "#a7f3d0"; }
+        if (iconBox) {
+          iconBox.style.background = "#d1fae5";
+          iconBox.style.color = "#059669";
+          iconBox.innerHTML = `<i data-lucide="user-check" style="width: 18px; height: 18px;"></i>`;
+        }
+        if (title) { title.textContent = "Activate Inspector Account"; title.style.color = "#065f46"; }
+        if (subtitle) { subtitle.textContent = "Restores inspector login access"; subtitle.style.color = "#047857"; }
+        if (prompt) prompt.textContent = `Are you sure you want to activate "${uName}"? The inspector will be able to log in to their account again.`;
+        if (note) {
+          note.style.background = "#eff6ff";
+          note.style.borderLeftColor = "#2563eb";
+          note.style.color = "#1e40af";
+          note.innerHTML = `<strong>Access Restored:</strong> The inspector will be able to sign in immediately and resume creating inspection reports.`;
+        }
+        if (confirmBtn) {
+          confirmBtn.style.background = "#059669";
+          confirmBtn.style.borderColor = "#047857";
+          confirmBtn.innerHTML = `<i data-lucide="user-check" style="width: 14px; height: 14px;"></i> <span id="btnConfirmToggleStatusText">Activate Account</span>`;
+        }
+      }
+
+      if (window.lucide) {
+        try { lucide.createIcons(); } catch (e) {}
+      }
+    } catch (err) {
+      console.error("Error setting toggle modal content:", err);
+    }
+  }
+
+  function hideToggleStatusModal() {
+    const modal = document.getElementById("adminToggleStatusModal");
+    if (modal) modal.style.display = "none";
+    if (wasAdminUserModalOpenForToggle) {
+      const userModal = document.getElementById("adminUserModal");
+      if (userModal) userModal.style.display = "flex";
+      wasAdminUserModalOpenForToggle = false;
+    }
+    pendingToggleUser = null;
+  }
+
+  function renderAdminUsersTable(users) {
+    const tbody = document.getElementById("adminUsersTableBody");
+    if (!tbody) return;
+
+    if (!users || users.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; padding: 2.5rem; color: #64748b;">No inspector accounts match your search.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = users.map(u => {
+      const isActive = (u.isActive !== undefined) ? !!u.isActive : (u.is_active !== undefined ? !!u.is_active : true);
+      const isVerified = (u.isVerified !== undefined) ? !!u.isVerified : !!u.is_verified;
+      
+      let statusBadge = "";
+      if (!isActive) {
+        statusBadge = `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; border-radius: 12px; font-size: 11px; font-weight: 600;" title="Login disabled — all reports preserved"><i data-lucide="ban" style="width:10px;height:10px;"></i> Deactivated</span>`;
+      } else if (isVerified) {
+        statusBadge = `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; border-radius: 12px; font-size: 11px; font-weight: 600;"><i data-lucide="check" style="width:10px;height:10px;"></i> Verified</span>`;
+      } else {
+        statusBadge = `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: #fffbeb; color: #d97706; border: 1px solid #fde68a; border-radius: 12px; font-size: 11px; font-weight: 600;"><i data-lucide="clock" style="width:10px;height:10px;"></i> Pending OTP</span>`;
+      }
+
+      const regDate = u.createdAt || u.created_at ? new Date(u.createdAt || u.created_at).toLocaleDateString() : "—";
+      const lastActive = u.lastLogin || u.last_login ? new Date(u.lastLogin || u.last_login).toLocaleDateString() : "Never";
+      const repCount = u.reportsCount ?? u.reports_count ?? 0;
+      const defectCount = u.totalDefects ?? u.total_defects ?? 0;
+      const isAdmin = u.role === 'admin';
+
+      return `
+        <tr class="admin-user-row" data-user-id="${u.id}" style="border-bottom: 1px solid #f1f5f9; background: ${isActive ? '#ffffff' : '#fafafa'}; opacity: ${isActive ? '1' : '0.88'}; cursor: pointer;" title="Click anywhere on row to view full inspector profile & reports">
+          <td style="padding: 12px 14px;">
+            <div style="font-weight: 600; color: #0f172a; display: flex; align-items: center; gap: 7px;">
+              <i data-lucide="${isAdmin ? 'shield' : (isActive ? 'user' : 'user-x')}" style="width: 14px; height: 14px; color: ${isAdmin ? '#dc2626' : (isActive ? '#2563eb' : '#94a3b8')};"></i>
+              <span>${escapeHtml(u.name || 'Inspector')}</span>
+              ${isAdmin ? '<span style="font-size: 9px; padding: 1px 5px; background: #fee2e2; color: #dc2626; border-radius: 3px; font-weight: 700;">ADMIN</span>' : ''}
+              ${!isActive ? '<span style="font-size: 9px; padding: 1px 5px; background: #fee2e2; color: #dc2626; border-radius: 3px; font-weight: 700;">DEACTIVATED</span>' : ''}
+            </div>
+          </td>
+          <td style="padding: 12px 14px; font-family: Consolas, monospace; font-size: 11.5px; color: #334155;">${escapeHtml(u.email || '—')}</td>
+          <td style="padding: 12px 14px; color: #475569;">${escapeHtml(u.phone || '—')}</td>
+          <td style="padding: 12px 14px; color: #475569;">${escapeHtml(u.organization || '—')}</td>
+          <td style="padding: 12px 14px;">${statusBadge}</td>
+          <td style="padding: 12px 14px; text-align: center;"><strong style="color: #0284c7;">${repCount}</strong></td>
+          <td style="padding: 12px 14px; text-align: center;"><span style="color: #ea580c; font-weight: 600;">${defectCount}</span></td>
+          <td style="padding: 12px 14px; color: #64748b; font-size: 11px;">${regDate}</td>
+          <td style="padding: 12px 14px; color: #64748b; font-size: 11px;">${lastActive}</td>
+          <td style="padding: 12px 14px; text-align: center; white-space: nowrap;">
+            <div style="display: inline-flex; align-items: center; gap: 6px;">
+              <button class="hip-btn btn-sm btn-admin-view-user" data-user-id="${u.id}" style="padding: 4px 10px; font-size: 11px; background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; border-radius: 4px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="View all reports by this inspector">
+                <i data-lucide="folder-open" style="width: 12px; height: 12px;"></i>
+                <span>Reports (${repCount})</span>
+              </button>
+              ${!isAdmin ? `
+              <button class="hip-btn btn-sm btn-admin-toggle-user" data-user-id="${u.id}" data-user-name="${escapeHtml(u.name || 'Inspector')}" data-user-email="${escapeHtml(u.email || '')}" data-user-active="${isActive ? 'true' : 'false'}" data-user-reports="${repCount}" data-user-defects="${defectCount}" style="padding: 4px 8px; font-size: 11px; ${isActive ? 'color: #b45309; border: 1px solid #fcd34d; background: #fffbeb;' : 'color: #059669; border: 1px solid #a7f3d0; background: #ecfdf5;'} border-radius: 4px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="${isActive ? 'Deactivate account (blocks login while keeping all reports and records safe)' : 'Activate account (restores login access)'}">
+                <i data-lucide="${isActive ? 'user-x' : 'user-check'}" style="width: 12px; height: 12px;"></i>
+                <span>${isActive ? 'Deactivate' : 'Activate'}</span>
+              </button>
+              <button class="hip-btn btn-sm btn-admin-del-user" data-user-id="${u.id}" data-user-email="${escapeHtml(u.email || '')}" data-user-name="${escapeHtml(u.name || 'Inspector')}" data-user-reports="${repCount}" data-user-defects="${defectCount}" style="padding: 4px 7px; color: #dc2626; border: 1px solid #fca5a5; background: #fff1f2; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center;" title="Permanently delete this inspector account and data">
+                <i data-lucide="trash-2" style="width: 12px; height: 12px;"></i>
+              </button>` : ''}
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join("");
+
+    if (window.lucide) {
+      try { lucide.createIcons(); } catch (e) {}
+    }
+
+    // Row Click: Clicking anywhere on the row opens the detailed inspector profile & reports
+    tbody.querySelectorAll(".admin-user-row").forEach(row => {
+      row.addEventListener("click", (e) => {
+        if (e.target.closest("button") || e.target.closest("a")) return;
+        const uid = row.getAttribute("data-user-id");
+        if (uid) openAdminUserModal(uid);
+      });
+    });
+
+    tbody.querySelectorAll(".btn-admin-view-user").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const uid = btn.getAttribute("data-user-id");
+        if (uid) openAdminUserModal(uid);
+      });
+    });
+
+    tbody.querySelectorAll(".btn-admin-toggle-user").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const uid = btn.getAttribute("data-user-id");
+        let user = adminUsersCache.find(u => String(u.id) === String(uid));
+        if (!user) {
+          user = {
+            id: uid,
+            name: btn.getAttribute("data-user-name") || "Inspector",
+            email: btn.getAttribute("data-user-email") || "—",
+            isActive: btn.getAttribute("data-user-active") !== "false",
+            is_active: btn.getAttribute("data-user-active") !== "false",
+            reportsCount: parseInt(btn.getAttribute("data-user-reports") || "0", 10),
+            totalDefects: parseInt(btn.getAttribute("data-user-defects") || "0", 10),
+          };
+        }
+        openToggleStatusModal(user);
+      });
+    });
+
+    tbody.querySelectorAll(".btn-admin-del-user").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const uid = btn.getAttribute("data-user-id");
+        let user = adminUsersCache.find(u => String(u.id) === String(uid));
+        if (!user) {
+          user = {
+            id: uid,
+            name: btn.getAttribute("data-user-name") || "Inspector",
+            email: btn.getAttribute("data-user-email") || "—",
+            reportsCount: parseInt(btn.getAttribute("data-user-reports") || "0", 10),
+            totalDefects: parseInt(btn.getAttribute("data-user-defects") || "0", 10),
+          };
+        }
+        openDeleteConfirmModal(user);
+      });
+    });
+  }
+
+  async function openAdminUserModal(userId) {
+    const modal = document.getElementById("adminUserModal");
+    if (!modal) return;
+
+    const user = adminUsersCache.find(u => String(u.id) === String(userId)) || {};
+
+    const avatarEl = document.getElementById("admSummaryAvatar");
+    const nameEl = document.getElementById("admSummaryName");
+    const emailEl = document.getElementById("admSummaryEmail");
+    const phoneEl = document.getElementById("admSummaryPhone");
+    const orgEl = document.getElementById("admSummaryOrg");
+    const roleEl = document.getElementById("admSummaryRole");
+    const statusPill = document.getElementById("admSummaryStatusPill");
+    const idEl = document.getElementById("admSummaryId");
+    const createdEl = document.getElementById("admSummaryCreated");
+    const lastLoginEl = document.getElementById("admSummaryLastLogin");
+    const titleEl = document.getElementById("adminModalUserTitle");
+    const countEl = document.getElementById("admUserReportsCount");
+
+    // Stat summary chips
+    const statRepEl = document.getElementById("admStatRepCount");
+    const statItemEl = document.getElementById("admStatItemCount");
+    const statDefectEl = document.getElementById("admStatDefectCount");
+    const statHazardEl = document.getElementById("admStatHazardCount");
+    const statPhotoEl = document.getElementById("admStatPhotoCount");
+
+    const name = user.name || "Inspector";
+    const initials = name.split(" ").filter(Boolean).map(w => w[0]).slice(0, 2).join("").toUpperCase() || "IN";
+    if (avatarEl) avatarEl.textContent = initials;
+    if (titleEl) titleEl.textContent = `Inspector: ${name} — Full Profile`;
+    if (nameEl) nameEl.textContent = name;
+    if (emailEl) emailEl.textContent = user.email || "—";
+    if (phoneEl) phoneEl.textContent = user.phone || "—";
+    if (orgEl) orgEl.textContent = user.organization || "—";
+    
+    const uid = user.id || userId || "";
+    if (idEl) {
+      idEl.textContent = uid ? (uid.length > 18 ? uid.slice(0, 16) + "..." : uid) : "—";
+      idEl.title = uid;
+    }
+
+    const isVerified = (user.isVerified !== undefined) ? !!user.isVerified : !!user.is_verified;
+    const isActive = (user.isActive !== undefined) ? !!user.isActive : (user.is_active !== undefined ? !!user.is_active : true);
+
+    if (statusPill) {
+      statusPill.innerHTML = isVerified
+        ? `<i data-lucide="check" style="width:10px;height:10px;"></i> Verified`
+        : `<i data-lucide="clock" style="width:10px;height:10px;"></i> Pending OTP`;
+      statusPill.style.background = isVerified ? "#ecfdf5" : "#fffbeb";
+      statusPill.style.color = isVerified ? "#059669" : "#d97706";
+      statusPill.style.borderColor = isVerified ? "#a7f3d0" : "#fde68a";
+    }
+
+    const activeBadge = document.getElementById("admSummaryActiveBadge");
+    if (activeBadge) {
+      activeBadge.innerHTML = isActive
+        ? `<i data-lucide="check-circle-2" style="width:10px;height:10px;"></i> Active`
+        : `<i data-lucide="ban" style="width:10px;height:10px;"></i> Deactivated`;
+      activeBadge.style.background = isActive ? "#ecfdf5" : "#fef2f2";
+      activeBadge.style.color = isActive ? "#059669" : "#dc2626";
+      activeBadge.style.borderColor = isActive ? "#a7f3d0" : "#fecaca";
+    }
+
+    const toggleBtn = document.getElementById("btnModalToggleActive");
+    function updateToggleBtnState(u) {
+      if (!toggleBtn) return;
+      if (u.role === 'admin') {
+        toggleBtn.style.display = "none";
+        return;
+      }
+      toggleBtn.style.display = "inline-flex";
+      const uActive = (u.isActive !== undefined) ? !!u.isActive : (u.is_active !== undefined ? !!u.is_active : true);
+      if (uActive) {
+        toggleBtn.style.background = "#fffbeb";
+        toggleBtn.style.color = "#b45309";
+        toggleBtn.style.border = "1px solid #fcd34d";
+        toggleBtn.innerHTML = `<i data-lucide="user-x" style="width: 14px; height: 14px;"></i> <span id="btnModalToggleActiveText">Deactivate Account</span>`;
+      } else {
+        toggleBtn.style.background = "#ecfdf5";
+        toggleBtn.style.color = "#059669";
+        toggleBtn.style.border = "1px solid #a7f3d0";
+        toggleBtn.innerHTML = `<i data-lucide="user-check" style="width: 14px; height: 14px;"></i> <span id="btnModalToggleActiveText">Activate Account</span>`;
+      }
+      toggleBtn.onclick = () => {
+        openToggleStatusModal(u);
+      };
+      if (window.lucide) {
+        try { lucide.createIcons(); } catch (e) {}
+      }
+    }
+
+    updateToggleBtnState(user);
+
+    if (roleEl) {
+      roleEl.textContent = (user.role || "user").toUpperCase();
+      roleEl.className = `badge-role ${user.role === 'admin' ? 'admin' : 'user'}`;
+    }
+
+    const createdVal = user.createdAt || user.created_at;
+    if (createdEl) createdEl.textContent = createdVal ? new Date(createdVal).toLocaleString() : "—";
+    const lastVal = user.lastLogin || user.last_login;
+    if (lastLoginEl) lastLoginEl.textContent = lastVal ? new Date(lastVal).toLocaleString() : "Active recently";
+
+    const repCount = user.reportsCount ?? user.reports_count ?? 0;
+    if (countEl) countEl.textContent = repCount;
+    if (statRepEl) statRepEl.textContent = repCount;
+    if (statItemEl) statItemEl.textContent = user.totalItems ?? user.total_items ?? (repCount > 0 ? "..." : 0);
+    if (statDefectEl) statDefectEl.textContent = user.totalDefects ?? user.total_defects ?? (repCount > 0 ? "..." : 0);
+    if (statHazardEl) statHazardEl.textContent = user.totalHazards ?? user.total_hazards ?? (repCount > 0 ? "..." : 0);
+    if (statPhotoEl) statPhotoEl.textContent = user.totalPhotos ?? user.total_photos ?? (repCount > 0 ? "..." : 0);
+
+    const tbody = document.getElementById("adminUserReportsBody");
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 1.5rem; color: #64748b;"><span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;margin-right:6px;"></span> Loading user inspection reports...</td></tr>`;
+    }
+
+    modal.style.display = "flex";
+    if (window.lucide) {
+      try { lucide.createIcons(); } catch (e) {}
+    }
+
+    try {
+      const token = State.authToken || localStorage.getItem("hzf_auth_token");
+      const resp = await fetch(apiUrl(`/api/admin/users/${userId}/reports`), {
+        headers: token ? { "Authorization": `Bearer ${token}` } : {}
+      });
+      if (resp.ok) {
+        const json = await resp.json();
+        const fullUser = Object.assign({}, user, json.user || {});
+        // Update user in cache if present
+        const cacheIdx = adminUsersCache.findIndex(u => String(u.id) === String(userId));
+        if (cacheIdx >= 0) {
+          adminUsersCache[cacheIdx] = Object.assign({}, adminUsersCache[cacheIdx], fullUser);
+        }
+
+        if (idEl && fullUser.id) {
+          idEl.textContent = fullUser.id.length > 18 ? fullUser.id.slice(0, 16) + "..." : fullUser.id;
+          idEl.title = fullUser.id;
+        }
+        if (lastLoginEl && fullUser.lastLogin) {
+          lastLoginEl.textContent = new Date(fullUser.lastLogin).toLocaleString();
+        }
+
+        const uActive = (fullUser.isActive !== undefined) ? !!fullUser.isActive : (fullUser.is_active !== undefined ? !!fullUser.is_active : true);
+        if (activeBadge) {
+          activeBadge.innerHTML = uActive
+            ? `<i data-lucide="check-circle-2" style="width:10px;height:10px;"></i> Active`
+            : `<i data-lucide="ban" style="width:10px;height:10px;"></i> Deactivated`;
+          activeBadge.style.background = uActive ? "#ecfdf5" : "#fef2f2";
+          activeBadge.style.color = uActive ? "#059669" : "#dc2626";
+          activeBadge.style.borderColor = uActive ? "#a7f3d0" : "#fecaca";
+        }
+
+        updateToggleBtnState(fullUser);
+
+        const repList = (json.success && Array.isArray(json.reports)) ? json.reports : [];
+        renderAdminUserReportsTable(repList, fullUser);
+      } else {
+        if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 1.5rem; color: #dc2626;">Failed to load reports.</td></tr>`;
+      }
+    } catch (err) {
+      if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 1.5rem; color: #dc2626;">Error: ${err.message}</td></tr>`;
+    }
+
+    if (window.lucide) lucide.createIcons();
+  }
+
+  function renderAdminUserReportsTable(reports, user) {
+    const tbody = document.getElementById("adminUserReportsBody");
+    const countEl = document.getElementById("admUserReportsCount");
+    const statRepEl = document.getElementById("admStatRepCount");
+    const statItemEl = document.getElementById("admStatItemCount");
+    const statDefectEl = document.getElementById("admStatDefectCount");
+    const statHazardEl = document.getElementById("admStatHazardCount");
+    const statPhotoEl = document.getElementById("admStatPhotoCount");
+    if (!tbody) return;
+
+    const repList = Array.isArray(reports) ? reports : [];
+    if (countEl) countEl.textContent = repList.length;
+
+    // Unconditionally compute live aggregates from the inspector's reports
+    let sumItems = 0, sumDefects = 0, sumHazards = 0, sumPhotos = 0;
+    repList.forEach(r => {
+      const stats = r.stats || {};
+      sumItems += Number(r.totalItems ?? stats.item_count ?? 0) || 0;
+      sumDefects += Number(r.defects ?? stats.defect_count ?? 0) || 0;
+      sumHazards += Number(r.hazards ?? stats.hazard_count ?? 0) || 0;
+      sumPhotos += Number(r.photoCount ?? stats.photo_count ?? 0) || 0;
+    });
+
+    if (statRepEl) statRepEl.textContent = repList.length;
+    if (statItemEl) statItemEl.textContent = sumItems;
+    if (statDefectEl) statDefectEl.textContent = sumDefects;
+    if (statHazardEl) statHazardEl.textContent = sumHazards;
+    if (statPhotoEl) statPhotoEl.textContent = sumPhotos;
+
+    if (repList.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 1.5rem; color: #64748b;">No inspection reports found for this user.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = repList.map(r => {
+      const d = r.data || {};
+      const client = d.clientInfo || {};
+      const clientName = r.clientName || client.clientName || "—";
+      const address = r.address || client.address || "—";
+      const stats = r.stats || {};
+      const itemsCount = r.totalItems ?? stats.item_count ?? 0;
+      const defectsCount = r.defects ?? stats.defect_count ?? 0;
+      const hazardsCount = r.hazards ?? stats.hazard_count ?? 0;
+      const photosCount = r.photoCount ?? stats.photo_count ?? 0;
+      const dateStr = r.savedAt || r.saved_at || r.inspectionDate || r.date || "—";
+
+      return `
+        <tr style="border-bottom: 1px solid #f1f5f9; background: #ffffff;">
+          <td style="padding: 10px 12px;">
+            <div style="font-weight: 600; color: #0f172a; display: flex; align-items: center; gap: 6px;">
+              <i data-lucide="file-text" style="width: 14px; height: 14px; color: #7c3aed;"></i>
+              <span>${escapeHtml(r.fileName || 'Inspection_Report.hzf')}</span>
+            </div>
+          </td>
+          <td style="padding: 10px 12px; font-weight: 500; color: #1e293b;">${escapeHtml(clientName)}</td>
+          <td style="padding: 10px 12px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #475569;" title="${escapeHtml(address)}">${escapeHtml(address)}</td>
+          <td style="padding: 10px 12px; color: #64748b; font-size: 11px;">${dateStr}</td>
+          <td style="padding: 10px 12px; text-align: center;">${itemsCount}</td>
+          <td style="padding: 10px 12px; text-align: center;"><span style="color: #ea580c; font-weight: 600;">${defectsCount}</span></td>
+          <td style="padding: 10px 12px; text-align: center;"><span style="color: #dc2626; font-weight: 600;">${hazardsCount}</span></td>
+          <td style="padding: 10px 12px; text-align: center;">${photosCount}</td>
+          <td style="padding: 10px 12px; text-align: center; white-space: nowrap;">
+            <div style="display: flex; gap: 5px; justify-content: center; align-items: center;">
+              <button class="hip-btn btn-sm btn-adm-view-pdf" data-rep-id="${r.id}" style="background: #0284c7; color: #ffffff; border: 1px solid #0284c7; font-weight: 600; padding: 4px 10px; border-radius: 4px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;" title="Open & view full visual inspection report in browser viewer">
+                <i data-lucide="eye" style="width: 13px; height: 13px;"></i>
+                <span>Open</span>
+              </button>
+              <button class="hip-btn btn-sm btn-adm-open-studio" data-rep-id="${r.id}" style="background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; font-weight: 600; padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;" title="Open and edit inspection inside studio workspace">
+                <i data-lucide="edit-3" style="width: 12px; height: 12px;"></i>
+                <span>Studio</span>
+              </button>
+              <button class="hip-btn btn-sm btn-adm-dl-pdf" data-rep-id="${r.id}" style="background: #ffffff; color: #dc2626; border: 1px solid #fca5a5; padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;" title="Download PDF report file">
+                <i data-lucide="download" style="width: 12px; height: 12px;"></i>
+                <span>PDF</span>
+              </button>
+              <button class="hip-btn btn-sm btn-adm-dl-hzf" data-rep-id="${r.id}" style="background: #ffffff; color: #2563eb; border: 1px solid #bfdbfe; padding: 4px 8px; border-radius: 4px; cursor: pointer;" title="Download .hzf archive">
+                <span>.hzf</span>
+              </button>
+              <button class="hip-btn btn-sm btn-adm-dl-bin" data-rep-id="${r.id}" style="background: #ffffff; color: #059669; border: 1px solid #a7f3d0; padding: 4px 8px; border-radius: 4px; cursor: pointer;" title="Download .bin archive">
+                <span>.bin</span>
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join("");
+
+    if (window.lucide) lucide.createIcons();
+
+    // Open & View PDF Report directly without navigating away from Admin Panel
+    tbody.querySelectorAll(".btn-adm-view-pdf").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const rid = btn.getAttribute("data-rep-id");
+        if (!rid) return;
+        const oldHtml = btn.innerHTML;
+        btn.innerHTML = `<span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;"></span> Opening...`;
+        btn.disabled = true;
+
+        const viewerTab = window.open('about:blank', '_blank');
+        if (viewerTab) {
+          viewerTab.document.write(`
+            <html><head><title>Opening Inspection Report...</title>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f8fafc; color: #1e293b; }
+              .box { text-align: center; background: #ffffff; padding: 32px 40px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border: 1px solid #e2e8f0; }
+              .spinner { width: 28px; height: 28px; border: 3px solid #e2e8f0; border-top-color: #0284c7; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px auto; }
+              @keyframes spin { to { transform: rotate(360deg); } }
+            </style>
+            </head><body><div class="box"><div class="spinner"></div><h3 style="margin:0 0 8px 0;">Compiling Inspection Report...</h3><p style="margin:0;font-size:13px;color:#64748b;">Rendering high-resolution vector layout, defect summaries, and inspection photos...</p></div></body></html>
+          `);
+        }
+
+        try {
+          const resp = await fetch(apiUrl(`/api/reports/${rid}`));
+          if (!resp.ok) throw new Error("Could not load report data");
+          const json = await resp.json();
+          if (!json.success || !json.data) throw new Error("Invalid report response");
+
+          const cleanBase = (json.data.fileName || 'Inspection_Report').replace(/\.[^/.]+$/, "");
+          const pdfFilename = `${cleanBase}_Report.pdf`;
+
+          const respPdf = await fetch(apiUrl('/api/export-pdf'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: rid,
+              fileName: pdfFilename,
+              clientInfo: json.data.clientInfo || {},
+              sections: json.data.sections || [],
+              coverPhoto: null,
+              inspectorInfo: {
+                companyName: json.data.clientInfo?.companyName || "N G Home Inspection Services",
+                inspectorName: json.data.clientInfo?.inspectorName || "Nitin Gujarathi",
+                phone: json.data.clientInfo?.inspectorPhone || "00919890002635",
+                email: json.data.clientInfo?.inspectorEmail || "niting@macj.in",
+                officeAddress: json.data.clientInfo?.inspectorAddress || "4_4 Yugaymangal complex, Kothrud, Pune, Maharashtra 411038"
+              }
+            })
+          });
+
+          if (!respPdf.ok) throw new Error("PDF generation service error");
+          const blob = await respPdf.blob();
+          const pdfUrl = URL.createObjectURL(blob);
+
+          if (viewerTab) {
+            viewerTab.location.href = pdfUrl;
+          } else {
+            window.open(pdfUrl, '_blank');
+          }
+          showToast("Report opened in viewer tab.");
+        } catch (err) {
+          if (viewerTab) viewerTab.close();
+          showToast("Error opening report: " + err.message, "error");
+        } finally {
+          btn.innerHTML = oldHtml;
+          btn.disabled = false;
+          if (window.lucide) lucide.createIcons();
+        }
+      });
+    });
+
+    // Optional: Open in Studio workspace with a prominent Back button
+    tbody.querySelectorAll(".btn-adm-open-studio").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const rid = btn.getAttribute("data-rep-id");
+        if (rid) {
+          const modal = document.getElementById("adminUserModal");
+          if (modal) modal.style.display = "none";
+          SavedReports.openSaved(rid);
+        }
+      });
+    });
+
+    tbody.querySelectorAll(".btn-adm-dl-pdf").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const rid = btn.getAttribute("data-rep-id");
+        if (rid) SavedReports.downloadSaved(rid, "pdf");
+      });
+    });
+
+    tbody.querySelectorAll(".btn-adm-dl-hzf").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const rid = btn.getAttribute("data-rep-id");
+        if (rid) SavedReports.downloadSaved(rid, "hzf");
+      });
+    });
+
+    tbody.querySelectorAll(".btn-adm-dl-bin").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const rid = btn.getAttribute("data-rep-id");
+        if (rid) SavedReports.downloadSaved(rid, "bin");
+      });
+    });
+  }
+
   // Switch between Welcome Hub and Active Inspection Workspace
   function setWorkspaceActive(active, pushState = true) {
-    State.isInspectionActive = active;
-    document.body.classList.toggle('workspace-active', active);
-
     const welcome = document.getElementById('welcomeScreen');
     const workspace = document.getElementById('activeWorkspace');
+    const admin = document.getElementById('adminScreen');
     const navTabs = document.getElementById('navCenterTabs');
     const exportGrp = document.getElementById('exportGroup');
     const navBack = document.getElementById('btnNavBack');
+    const btnAdminBack = document.getElementById('btnAdminBackToDash');
+    const isAdmin = State.currentUser && State.currentUser.role === 'admin';
 
+    if (isAdmin) {
+      State.isInspectionActive = active;
+      document.body.classList.toggle('workspace-active', active);
+      if (welcome) welcome.style.display = 'none';
+
+      if (active) {
+        if (admin) admin.style.display = 'none';
+        if (workspace) workspace.style.display = 'flex';
+        if (navTabs) navTabs.style.display = 'flex';
+        if (exportGrp) exportGrp.style.display = 'flex';
+        if (btnAdminBack) btnAdminBack.style.display = 'inline-flex';
+        if (navBack) navBack.style.display = 'none';
+        renderAll();
+      } else {
+        if (admin) admin.style.display = 'flex';
+        if (workspace) workspace.style.display = 'none';
+        if (navTabs) navTabs.style.display = 'none';
+        if (exportGrp) exportGrp.style.display = 'none';
+        if (btnAdminBack) btnAdminBack.style.display = 'none';
+        if (navBack) navBack.style.display = 'none';
+        loadAdminDashboard();
+      }
+      return;
+    }
+
+    State.isInspectionActive = active;
+    document.body.classList.toggle('workspace-active', active);
+
+    if (admin) admin.style.display = 'none';
+    if (btnAdminBack) btnAdminBack.style.display = 'none';
     if (welcome) welcome.style.display = active ? 'none' : 'flex';
     if (workspace) workspace.style.display = active ? 'flex' : 'none';
     if (navTabs) navTabs.style.display = active ? 'flex' : 'none';
@@ -1465,9 +2496,13 @@
         <div class="photos-strip">
           ${photosHtml}
           <input type="file" id="up_${item.id}" accept="image/*" style="display:none;" onchange="window.App.uploadPhoto('${sec.id}', '${item.id}', this)">
-          <button class="btn-upload-photo" onclick="document.getElementById('up_${item.id}').click()" title="Attach photo from mobile or computer">
-            <i data-lucide="camera"></i>
+          <button type="button" class="btn-upload-photo" onclick="document.getElementById('up_${item.id}').click()" title="Attach photo from gallery or computer">
+            <i data-lucide="image"></i>
             <span>+ Photo</span>
+          </button>
+          <button type="button" class="btn-live-photo" onclick="window.App.openLiveCamera('${sec.id}', '${item.id}')" title="Open camera to snap live defect photo and crop">
+            <i data-lucide="camera"></i>
+            <span>Live Photo</span>
           </button>
         </div>
       `;
@@ -2379,8 +3414,443 @@
     renderReport();
   }
 
+  // ==========================================================================
+  // LIVE INSPECTION CAMERA & CROP ENGINE
+  // ==========================================================================
+  let activeLiveCameraTarget = null; // { secId, itemId, replaceIdx }
+  let currentCameraStream = null;
+  let currentFacingMode = "environment"; // "environment" (rear camera) or "user" (front)
+  let liveCameraRawImage = null; // HTMLImageElement
+  let cropRotation = 0; // 0, 90, 180, 270
+  let cropAspect = 4 / 3; // 4/3, 16/9, 1/1, or 'free'
+  let cropCanvasScale = 1;
+  let cropState = {
+    rect: null, // { x, y, w, h } in display canvas coordinates
+    isDragging: false,
+    dragAction: null, // 'move', 'nw', 'ne', 'sw', 'se', 'n', 's', 'w', 'e'
+    dragStart: { x: 0, y: 0 },
+    origRect: null
+  };
+
+  async function openLiveCameraModal(secId, itemId, replaceIdx = null, directDataUrl = null, optionalCaption = null) {
+    const sec = State.sections.find(s => s.id === secId);
+    const it = sec?.items.find(i => i.id === itemId);
+    activeLiveCameraTarget = { secId, itemId, replaceIdx };
+
+    const modal = document.getElementById('liveCameraModal');
+    if (!modal) return;
+
+    const titleEl = document.getElementById('liveCameraModalTitle');
+    const subEl = document.getElementById('liveCameraModalSubtitle');
+    const captionInput = document.getElementById('livePhotoCaptionInput');
+    if (titleEl) titleEl.textContent = replaceIdx !== null ? "Crop / Adjust Photo" : "Live Inspection Camera";
+    if (subEl) subEl.textContent = it ? `${sec.name} • ${it.name}` : "Capture defect photo";
+    if (captionInput) captionInput.value = optionalCaption !== null ? optionalCaption : (it?.name || "");
+
+    modal.style.display = 'flex';
+    if (window.lucide) {
+      try { lucide.createIcons(); } catch (e) {}
+    }
+
+    if (directDataUrl) {
+      // Direct Crop Mode (from existing photo or external source)
+      initCropEditorWithImage(directDataUrl, optionalCaption);
+    } else {
+      // Live Camera Viewfinder Mode
+      showCameraViewfinder();
+      await startCameraStream();
+    }
+  }
+
+  function showCameraViewfinder() {
+    const vPane = document.getElementById('cameraViewfinderPane');
+    const cPane = document.getElementById('cameraCropPane');
+    const btnRetake = document.getElementById('btnRetakeFromCrop');
+    const btnConfirm = document.getElementById('btnConfirmPhotoCrop');
+    if (vPane) vPane.style.display = 'flex';
+    if (cPane) cPane.style.display = 'none';
+    if (btnRetake) btnRetake.style.display = 'none';
+    if (btnConfirm) btnConfirm.style.display = 'none';
+  }
+
+  function showCameraCropView(dataUrl, caption) {
+    stopCameraStream();
+    const vPane = document.getElementById('cameraViewfinderPane');
+    const cPane = document.getElementById('cameraCropPane');
+    const btnRetake = document.getElementById('btnRetakeFromCrop');
+    const btnConfirm = document.getElementById('btnConfirmPhotoCrop');
+    if (vPane) vPane.style.display = 'none';
+    if (cPane) cPane.style.display = 'flex';
+    if (btnRetake) btnRetake.style.display = 'inline-flex';
+    if (btnConfirm) btnConfirm.style.display = 'inline-flex';
+    initCropEditorWithImage(dataUrl, caption);
+  }
+
+  async function startCameraStream() {
+    stopCameraStream();
+    const loader = document.getElementById('cameraLoadingIndicator');
+    const msg = document.getElementById('cameraStatusMsg');
+    if (loader) loader.style.display = 'flex';
+    if (msg) msg.textContent = "Connecting to device camera...";
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      if (loader) loader.style.display = 'flex';
+      if (msg) {
+        msg.innerHTML = `<strong>Direct Stream Unavailable</strong><br><span style="font-size:11px;color:#cbd5e1;">Your browser requires HTTPS for direct webcam stream.<br>Click <strong>Device App</strong> or <strong>Gallery</strong> below:</span>`;
+      }
+      return;
+    }
+
+    try {
+      const constraints = {
+        video: {
+          facingMode: { ideal: currentFacingMode },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        },
+        audio: false
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      currentCameraStream = stream;
+      const video = document.getElementById('liveCameraVideo');
+      if (video) {
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          video.play().catch(() => {});
+          if (loader) loader.style.display = 'none';
+        };
+      }
+    } catch (err) {
+      console.warn("Camera stream error:", err);
+      if (loader) loader.style.display = 'flex';
+      if (msg) {
+        msg.innerHTML = `<strong>Camera Blocked or Unavailable</strong><br><span style="font-size:11px;color:#cbd5e1;">Permission denied or camera in use.<br>Click <strong>Device App</strong> or <strong>Gallery</strong> below:</span>`;
+      }
+    }
+  }
+
+  function stopCameraStream() {
+    if (currentCameraStream) {
+      try {
+        currentCameraStream.getTracks().forEach(t => t.stop());
+      } catch (e) {}
+      currentCameraStream = null;
+    }
+    const video = document.getElementById('liveCameraVideo');
+    if (video) video.srcObject = null;
+  }
+
+  function closeLiveCameraModal() {
+    stopCameraStream();
+    const modal = document.getElementById('liveCameraModal');
+    if (modal) modal.style.display = 'none';
+    activeLiveCameraTarget = null;
+    liveCameraRawImage = null;
+    cropState.rect = null;
+  }
+
+  function initCropEditorWithImage(dataUrl, caption) {
+    if (caption !== undefined && caption !== null) {
+      const captionInput = document.getElementById('livePhotoCaptionInput');
+      if (captionInput) captionInput.value = caption;
+    }
+    cropRotation = 0;
+    cropAspect = 4 / 3;
+    document.querySelectorAll('.btn-crop-ratio').forEach(btn => {
+      btn.classList.toggle('active', btn.getAttribute('data-ratio') === '4/3');
+    });
+
+    const img = new Image();
+    img.onload = () => {
+      liveCameraRawImage = img;
+      cropState.rect = null;
+      setupAndDrawCropCanvas();
+    };
+    img.src = dataUrl;
+  }
+
+  function getRotatedOffscreenCanvas() {
+    if (!liveCameraRawImage) return null;
+    const off = document.createElement('canvas');
+    const rad = (cropRotation * Math.PI) / 180;
+    const isSideways = cropRotation === 90 || cropRotation === 270;
+    off.width = isSideways ? liveCameraRawImage.naturalHeight : liveCameraRawImage.naturalWidth;
+    off.height = isSideways ? liveCameraRawImage.naturalWidth : liveCameraRawImage.naturalHeight;
+    const ctx = off.getContext('2d');
+    ctx.translate(off.width / 2, off.height / 2);
+    ctx.rotate(rad);
+    ctx.drawImage(liveCameraRawImage, -liveCameraRawImage.naturalWidth / 2, -liveCameraRawImage.naturalHeight / 2);
+    return off;
+  }
+
+  function setupAndDrawCropCanvas() {
+    const off = getRotatedOffscreenCanvas();
+    if (!off) return;
+
+    const canvas = document.getElementById('cropCanvas');
+    const wrapper = document.getElementById('cropCanvasWrapper');
+    if (!canvas || !wrapper) return;
+
+    const maxW = Math.max(260, Math.min(wrapper.clientWidth || 560, window.innerWidth - 60));
+    const maxH = Math.max(200, Math.min(wrapper.clientHeight || 360, window.innerHeight * 0.46));
+    const scale = Math.min(maxW / off.width, maxH / off.height, 1);
+
+    canvas.width = Math.max(100, Math.round(off.width * scale));
+    canvas.height = Math.max(100, Math.round(off.height * scale));
+    cropCanvasScale = scale;
+
+    const ctx = canvas.getContext('2d');
+
+    // Calculate crop rectangle if not set
+    if (!cropState.rect || cropState.rect.w === 0) {
+      let rw = Math.round(canvas.width * 0.88);
+      let rh;
+      if (cropAspect === 'free' || !cropAspect) {
+        rh = Math.round(canvas.height * 0.88);
+      } else {
+        rh = Math.round(rw / cropAspect);
+        if (rh > canvas.height * 0.95) {
+          rh = Math.round(canvas.height * 0.95);
+          rw = Math.round(rh * cropAspect);
+        }
+      }
+      cropState.rect = {
+        x: Math.max(0, Math.round((canvas.width - rw) / 2)),
+        y: Math.max(0, Math.round((canvas.height - rh) / 2)),
+        w: Math.min(canvas.width, rw),
+        h: Math.min(canvas.height, rh)
+      };
+    } else {
+      // Clamp within canvas boundaries
+      cropState.rect.x = Math.max(0, Math.min(canvas.width - 30, cropState.rect.x));
+      cropState.rect.y = Math.max(0, Math.min(canvas.height - 30, cropState.rect.y));
+      cropState.rect.w = Math.min(canvas.width - cropState.rect.x, cropState.rect.w);
+      cropState.rect.h = Math.min(canvas.height - cropState.rect.y, cropState.rect.h);
+    }
+
+    // Draw rotated image scaled onto canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(off, 0, 0, canvas.width, canvas.height);
+
+    const r = cropState.rect;
+
+    // Darkened Overlay outside crop area
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.58)';
+    ctx.fillRect(0, 0, canvas.width, r.y); // Top
+    ctx.fillRect(0, r.y + r.h, canvas.width, canvas.height - (r.y + r.h)); // Bottom
+    ctx.fillRect(0, r.y, r.x, r.h); // Left
+    ctx.fillRect(r.x + r.w, r.y, canvas.width - (r.x + r.w), r.h); // Right
+
+    // Crop Outline
+    ctx.strokeStyle = '#3b82f6';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(r.x, r.y, r.w, r.h);
+
+    // Rule of thirds lines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(r.x + r.w / 3, r.y); ctx.lineTo(r.x + r.w / 3, r.y + r.h);
+    ctx.moveTo(r.x + (r.w * 2) / 3, r.y); ctx.lineTo(r.x + (r.w * 2) / 3, r.y + r.h);
+    ctx.moveTo(r.x, r.y + r.h / 3); ctx.lineTo(r.x + r.w, r.y + r.h / 3);
+    ctx.moveTo(r.x, r.y + (r.h * 2) / 3); ctx.lineTo(r.x + r.w, r.y + (r.h * 2) / 3);
+    ctx.stroke();
+
+    // 8 Drag Handles (4 Corners + 4 Edge Midpoints)
+    const handles = [
+      { x: r.x, y: r.y }, // NW
+      { x: r.x + r.w, y: r.y }, // NE
+      { x: r.x, y: r.y + r.h }, // SW
+      { x: r.x + r.w, y: r.y + r.h }, // SE
+      { x: r.x + r.w / 2, y: r.y }, // N
+      { x: r.x + r.w / 2, y: r.y + r.h }, // S
+      { x: r.x, y: r.y + r.h / 2 }, // W
+      { x: r.x + r.w, y: r.y + r.h / 2 }, // E
+    ];
+    handles.forEach(h => {
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#2563eb';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(h.x, h.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
+  }
+
+  function getCanvasTouchPos(canvas, e) {
+    const bbox = canvas.getBoundingClientRect();
+    const touch = e.touches ? e.touches[0] : (e.changedTouches ? e.changedTouches[0] : e);
+    return {
+      x: (touch.clientX - bbox.left) * (canvas.width / bbox.width),
+      y: (touch.clientY - bbox.top) * (canvas.height / bbox.height)
+    };
+  }
+
+  function getCropDragAction(pos) {
+    if (!cropState.rect) return null;
+    const r = cropState.rect;
+    const dist = (x1, y1, x2, y2) => Math.hypot(x1 - x2, y1 - y2);
+
+    if (dist(pos.x, pos.y, r.x, r.y) <= 18) return 'nw';
+    if (dist(pos.x, pos.y, r.x + r.w, r.y) <= 18) return 'ne';
+    if (dist(pos.x, pos.y, r.x, r.y + r.h) <= 18) return 'sw';
+    if (dist(pos.x, pos.y, r.x + r.w, r.y + r.h) <= 18) return 'se';
+
+    if (dist(pos.x, pos.y, r.x + r.w / 2, r.y) <= 14) return 'n';
+    if (dist(pos.x, pos.y, r.x + r.w / 2, r.y + r.h) <= 14) return 's';
+    if (dist(pos.x, pos.y, r.x, r.y + r.h / 2) <= 14) return 'w';
+    if (dist(pos.x, pos.y, r.x + r.w, r.y + r.h / 2) <= 14) return 'e';
+
+    if (pos.x >= r.x && pos.x <= r.x + r.w && pos.y >= r.y && pos.y <= r.y + r.h) {
+      return 'move';
+    }
+    return null;
+  }
+
+  function handleCropPointerDown(pos) {
+    const action = getCropDragAction(pos);
+    if (!action) return;
+    cropState.isDragging = true;
+    cropState.dragAction = action;
+    cropState.dragStart = { x: pos.x, y: pos.y };
+    cropState.origRect = { ...cropState.rect };
+  }
+
+  function handleCropPointerMove(pos, canvas) {
+    if (!cropState.isDragging || !cropState.origRect) {
+      const action = getCropDragAction(pos);
+      if (action === 'nw' || action === 'se') canvas.style.cursor = 'nwse-resize';
+      else if (action === 'ne' || action === 'sw') canvas.style.cursor = 'nesw-resize';
+      else if (action === 'n' || action === 's') canvas.style.cursor = 'ns-resize';
+      else if (action === 'w' || action === 'e') canvas.style.cursor = 'ew-resize';
+      else if (action === 'move') canvas.style.cursor = 'move';
+      else canvas.style.cursor = 'crosshair';
+      return;
+    }
+
+    const dx = pos.x - cropState.dragStart.x;
+    const dy = pos.y - cropState.dragStart.y;
+    const orig = cropState.origRect;
+    const minSize = 35;
+
+    if (cropState.dragAction === 'move') {
+      const newX = Math.max(0, Math.min(canvas.width - orig.w, orig.x + dx));
+      const newY = Math.max(0, Math.min(canvas.height - orig.h, orig.y + dy));
+      cropState.rect.x = Math.round(newX);
+      cropState.rect.y = Math.round(newY);
+    } else if (cropState.dragAction === 'se') {
+      let newW = Math.max(minSize, Math.min(canvas.width - orig.x, orig.w + dx));
+      let newH = cropAspect && cropAspect !== 'free' ? newW / cropAspect : Math.max(minSize, Math.min(canvas.height - orig.y, orig.h + dy));
+      if (orig.y + newH > canvas.height) {
+        newH = canvas.height - orig.y;
+        if (cropAspect && cropAspect !== 'free') newW = newH * cropAspect;
+      }
+      cropState.rect.w = Math.round(newW);
+      cropState.rect.h = Math.round(newH);
+    } else if (cropState.dragAction === 'sw') {
+      let newW = Math.max(minSize, Math.min(orig.x + orig.w, orig.w - dx));
+      let newH = cropAspect && cropAspect !== 'free' ? newW / cropAspect : Math.max(minSize, Math.min(canvas.height - orig.y, orig.h + dy));
+      if (orig.y + newH > canvas.height) {
+        newH = canvas.height - orig.y;
+        if (cropAspect && cropAspect !== 'free') newW = newH * cropAspect;
+      }
+      cropState.rect.x = Math.round(orig.x + (orig.w - newW));
+      cropState.rect.w = Math.round(newW);
+      cropState.rect.h = Math.round(newH);
+    } else if (cropState.dragAction === 'ne') {
+      let newW = Math.max(minSize, Math.min(canvas.width - orig.x, orig.w + dx));
+      let newH = cropAspect && cropAspect !== 'free' ? newW / cropAspect : Math.max(minSize, orig.h - dy);
+      let newY = orig.y + (orig.h - newH);
+      if (newY < 0) {
+        newY = 0;
+        newH = orig.y + orig.h;
+        if (cropAspect && cropAspect !== 'free') newW = newH * cropAspect;
+      }
+      cropState.rect.y = Math.round(newY);
+      cropState.rect.w = Math.round(newW);
+      cropState.rect.h = Math.round(newH);
+    } else if (cropState.dragAction === 'nw') {
+      let newW = Math.max(minSize, Math.min(orig.x + orig.w, orig.w - dx));
+      let newH = cropAspect && cropAspect !== 'free' ? newW / cropAspect : Math.max(minSize, orig.h - dy);
+      let newX = orig.x + (orig.w - newW);
+      let newY = orig.y + (orig.h - newH);
+      if (newX < 0) newX = 0;
+      if (newY < 0) {
+        newY = 0;
+        newH = orig.y + orig.h;
+        if (cropAspect && cropAspect !== 'free') {
+          newW = newH * cropAspect;
+          newX = orig.x + orig.w - newW;
+        }
+      }
+      cropState.rect.x = Math.round(newX);
+      cropState.rect.y = Math.round(newY);
+      cropState.rect.w = Math.round(newW);
+      cropState.rect.h = Math.round(newH);
+    }
+    setupAndDrawCropCanvas();
+  }
+
+  function handleCropPointerUp() {
+    cropState.isDragging = false;
+    cropState.dragAction = null;
+    cropState.origRect = null;
+  }
+
+  function saveCroppedPhotoToItem() {
+    if (!activeLiveCameraTarget || !cropState.rect) return;
+    const off = getRotatedOffscreenCanvas();
+    if (!off) return;
+
+    const sx = Math.max(0, Math.round(cropState.rect.x / cropCanvasScale));
+    const sy = Math.max(0, Math.round(cropState.rect.y / cropCanvasScale));
+    const sw = Math.min(off.width - sx, Math.round(cropState.rect.w / cropCanvasScale));
+    const sh = Math.min(off.height - sy, Math.round(cropState.rect.h / cropCanvasScale));
+
+    const maxOut = 1600;
+    const outScale = Math.min(maxOut / sw, maxOut / sh, 1);
+    const outW = Math.round(sw * outScale);
+    const outH = Math.round(sh * outScale);
+
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = Math.max(1, outW);
+    outCanvas.height = Math.max(1, outH);
+    const outCtx = outCanvas.getContext('2d');
+    outCtx.drawImage(off, sx, sy, sw, sh, 0, 0, outW, outH);
+    const croppedDataUrl = outCanvas.toDataURL('image/jpeg', 0.88);
+
+    const { secId, itemId, replaceIdx } = activeLiveCameraTarget;
+    const sec = State.sections.find(s => s.id === secId);
+    const it = sec?.items.find(i => i.id === itemId);
+    if (it) {
+      if (!it.photos) it.photos = [];
+      const captionText = document.getElementById('livePhotoCaptionInput')?.value.trim() || it.name;
+      if (replaceIdx !== null && replaceIdx !== undefined && it.photos[replaceIdx]) {
+        it.photos[replaceIdx].dataUrl = croppedDataUrl;
+        it.photos[replaceIdx].caption = captionText;
+        showToast(`Photo updated on ${it.name}`);
+      } else {
+        it.photos.push({
+          filename: `photo_${Date.now()}_camera.jpg`,
+          dataUrl: croppedDataUrl,
+          caption: captionText
+        });
+        showToast(`Live photo added to ${it.name}`);
+      }
+      State.isDirty = true;
+      renderItems();
+      renderReport();
+      saveActiveSession();
+    }
+    closeLiveCameraModal();
+  }
+
   // Public App Handlers
   window.App = {
+    openLiveCamera: function (secId, itemId) {
+      openLiveCameraModal(secId, itemId);
+    },
     setStatus: function (secId, itemId, status) {
       const sec = State.sections.find(s => s.id === secId);
       const it = sec?.items.find(i => i.id === itemId);
@@ -3357,6 +4827,523 @@
   // DOM Event Listeners
   document.addEventListener('DOMContentLoaded', async () => {
 
+    // Immediate auth check on DOM load to prevent flash of studio in background
+    if (!localStorage.getItem("hzf_auth_token")) {
+      document.body.classList.add("auth-mode-active");
+      const authOverlay = document.getElementById("authScreen");
+      if (authOverlay) authOverlay.style.display = "flex";
+    }
+
+    // ------------------------------------------------------------------------
+    // AUTHENTICATION & ADMIN CONTROLS WIRING
+    // ------------------------------------------------------------------------
+    document.getElementById('tabAuthLogin')?.addEventListener('click', () => setAuthTab('login'));
+    document.getElementById('tabAuthRegister')?.addEventListener('click', () => setAuthTab('register'));
+    document.getElementById('linkSwitchToRegister')?.addEventListener('click', (e) => { e.preventDefault(); setAuthTab('register'); });
+    document.getElementById('linkSwitchToLogin')?.addEventListener('click', (e) => { e.preventDefault(); setAuthTab('login'); });
+    document.getElementById('btnBackToAuth')?.addEventListener('click', (e) => { e.preventDefault(); setAuthTab('login'); });
+    document.getElementById('linkForgotPassword')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      const currentEmail = document.getElementById('loginEmail')?.value.trim();
+      if (currentEmail) pendingAuthEmail = currentEmail;
+      setAuthTab('forgot');
+    });
+    document.getElementById('linkBackToLoginFromForgot')?.addEventListener('click', (e) => { e.preventDefault(); setAuthTab('login'); });
+    document.getElementById('linkBackToLoginFromReset')?.addEventListener('click', (e) => { e.preventDefault(); setAuthTab('login'); });
+
+    // Login Form Submit
+    document.getElementById('formAuthLogin')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('loginEmail')?.value.trim();
+      const password = document.getElementById('loginPassword')?.value;
+      const btn = document.getElementById('btnLoginSubmit');
+
+      if (!email || !password) {
+        showAuthAlert("Please provide both email and password.");
+        return;
+      }
+
+      const oldBtnHtml = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.innerHTML = `<span class="spinner" style="width:13px;height:13px;border-width:2px;display:inline-block;margin-right:6px;"></span> Signing In...`;
+        btn.disabled = true;
+      }
+      showAuthAlert("");
+
+      try {
+        const resp = await _nativeFetch(apiUrl('/api/auth/login'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const res = await resp.json();
+
+        if (resp.ok && res.success) {
+          if (res.requires_verification) {
+            pendingAuthEmail = email;
+            setAuthTab('otp');
+            showAuthAlert("A verification code was sent to your email. Please enter it below to activate your account.", "info");
+            return;
+          }
+          State.authToken = res.token;
+          State.currentUser = res.user;
+          localStorage.setItem('hzf_auth_token', res.token);
+          localStorage.setItem('hzf_user_info', JSON.stringify(res.user));
+          updateUserToolbar(res.user);
+          hideAuthScreen();
+          showToast(`Welcome back, ${res.user.name || res.user.email}!`);
+
+          if (res.user.role === 'admin') {
+            openAdminPanel();
+          } else {
+            refreshSavedReportsCount();
+          }
+        } else {
+          showAuthAlert(res.detail || res.message || "Invalid email or password.");
+        }
+      } catch (err) {
+        showAuthAlert("Connection error: " + err.message);
+      } finally {
+        if (btn) {
+          btn.innerHTML = oldBtnHtml;
+          btn.disabled = false;
+        }
+      }
+    });
+
+    // Sign Up Form Submit
+    document.getElementById('formAuthRegister')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = document.getElementById('regName')?.value.trim();
+      const phone = document.getElementById('regPhone')?.value.trim();
+      const org = document.getElementById('regOrg')?.value.trim();
+      const email = document.getElementById('regEmail')?.value.trim();
+      const password = document.getElementById('regPassword')?.value;
+      const confirmPassword = document.getElementById('regConfirmPassword')?.value;
+      const btn = document.getElementById('btnRegisterSubmit');
+
+      if (!name || !phone || !email || !password) {
+        showAuthAlert("Please fill in all required fields.");
+        return;
+      }
+      if (password !== confirmPassword) {
+        showAuthAlert("Passwords do not match. Please re-enter.");
+        return;
+      }
+      if (password.length < 6) {
+        showAuthAlert("Password must be at least 6 characters.");
+        return;
+      }
+
+      const oldBtnHtml = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.innerHTML = `<span class="spinner" style="width:13px;height:13px;border-width:2px;display:inline-block;margin-right:6px;"></span> Sending Verification Code...`;
+        btn.disabled = true;
+      }
+      showAuthAlert("");
+
+      try {
+        const resp = await _nativeFetch(apiUrl('/api/auth/register'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, phone, organization: org, email, password })
+        });
+        const res = await resp.json();
+
+        if (resp.ok && res.success) {
+          pendingAuthEmail = email;
+          setAuthTab('otp');
+          if (res.dev_otp) {
+            console.log("DEV OTP CODE:", res.dev_otp);
+          }
+          showAuthAlert(res.message || "Verification code dispatched! Please check your email inbox.", "success");
+        } else {
+          showAuthAlert(res.detail || res.message || "Registration failed.");
+        }
+      } catch (err) {
+        showAuthAlert("Registration error: " + err.message);
+      } finally {
+        if (btn) {
+          btn.innerHTML = oldBtnHtml;
+          btn.disabled = false;
+        }
+      }
+    });
+
+    // OTP Verification Submit
+    document.getElementById('formAuthOtp')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const otpCode = document.getElementById('otpCodeInput')?.value.trim();
+      const btn = document.getElementById('btnVerifyOtpSubmit');
+
+      if (!otpCode || otpCode.length !== 6) {
+        showAuthAlert("Please enter the complete 6-digit verification code.");
+        return;
+      }
+
+      const oldBtnHtml = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.innerHTML = `<span class="spinner" style="width:13px;height:13px;border-width:2px;display:inline-block;margin-right:6px;"></span> Verifying Code...`;
+        btn.disabled = true;
+      }
+      showAuthAlert("");
+
+      try {
+        const resp = await _nativeFetch(apiUrl('/api/auth/verify-otp'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: pendingAuthEmail, otp: otpCode, otp_code: otpCode })
+        });
+        const res = await resp.json();
+
+        if (resp.ok && res.success) {
+          State.authToken = res.token;
+          State.currentUser = res.user;
+          localStorage.setItem('hzf_auth_token', res.token);
+          localStorage.setItem('hzf_user_info', JSON.stringify(res.user));
+          updateUserToolbar(res.user);
+          hideAuthScreen();
+          showToast(`Account verified! Welcome to HZF Inspector Studio.`);
+
+          if (res.user.role === 'admin') {
+            openAdminPanel();
+          } else {
+            refreshSavedReportsCount();
+          }
+        } else {
+          showAuthAlert(res.detail || res.message || "Invalid verification code.");
+        }
+      } catch (err) {
+        showAuthAlert("Verification error: " + err.message);
+      } finally {
+        if (btn) {
+          btn.innerHTML = oldBtnHtml;
+          btn.disabled = false;
+        }
+      }
+    });
+
+    // Resend OTP Code
+    document.getElementById('btnResendOtp')?.addEventListener('click', async () => {
+      if (!pendingAuthEmail) {
+        showAuthAlert("Please enter your email to request a code.");
+        return;
+      }
+      try {
+        const resp = await _nativeFetch(apiUrl('/api/auth/resend-otp'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: pendingAuthEmail })
+        });
+        const res = await resp.json();
+        if (resp.ok && res.success) {
+          if (res.dev_otp) console.log("DEV RESENT OTP:", res.dev_otp);
+          showAuthAlert("A new verification code has been dispatched to your email.", "success");
+        } else {
+          showAuthAlert(res.detail || "Unable to resend code right now.");
+        }
+      } catch (err) {
+        showAuthAlert("Error resending code: " + err.message);
+      }
+    });
+
+    // Forgot Password Request Form Submit
+    document.getElementById('formAuthForgotPassword')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('forgotEmail')?.value.trim();
+      const btn = document.getElementById('btnForgotSubmit');
+
+      if (!email) {
+        showAuthAlert("Please enter your registered email address.");
+        return;
+      }
+
+      const oldBtnHtml = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.innerHTML = `<span class="spinner" style="width:13px;height:13px;border-width:2px;display:inline-block;margin-right:6px;"></span> Sending Reset Code...`;
+        btn.disabled = true;
+      }
+      showAuthAlert("");
+
+      try {
+        const resp = await _nativeFetch(apiUrl('/api/auth/forgot-password/request'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+        const res = await resp.json();
+
+        if (resp.ok && res.success) {
+          pendingAuthEmail = email;
+          setAuthTab('reset-password');
+          showAuthAlert(res.message || "A 6-digit password reset code has been sent to your email.", "success");
+        } else {
+          showAuthAlert(res.detail || res.message || "Unable to send password reset code.");
+        }
+      } catch (err) {
+        showAuthAlert("Network error: " + err.message);
+      } finally {
+        if (btn) {
+          btn.innerHTML = oldBtnHtml;
+          btn.disabled = false;
+        }
+      }
+    });
+
+    // Reset Password Form Submit
+    document.getElementById('formAuthResetPassword')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const otpCode = document.getElementById('resetOtpCode')?.value.trim();
+      const newPassword = document.getElementById('resetNewPassword')?.value;
+      const confirmPassword = document.getElementById('resetConfirmPassword')?.value;
+      const btn = document.getElementById('btnResetPasswordSubmit');
+
+      if (!otpCode || otpCode.length !== 6) {
+        showAuthAlert("Please enter the complete 6-digit reset code.");
+        return;
+      }
+
+      if (!newPassword || newPassword.length < 6) {
+        showAuthAlert("Password must be at least 6 characters long.");
+        return;
+      }
+
+      if (newPassword !== confirmPassword) {
+        showAuthAlert("Passwords do not match. Please verify and re-enter.");
+        return;
+      }
+
+      const oldBtnHtml = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.innerHTML = `<span class="spinner" style="width:13px;height:13px;border-width:2px;display:inline-block;margin-right:6px;"></span> Updating Password...`;
+        btn.disabled = true;
+      }
+      showAuthAlert("");
+
+      try {
+        const resp = await _nativeFetch(apiUrl('/api/auth/forgot-password/reset'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: pendingAuthEmail,
+            otp: otpCode,
+            new_password: newPassword
+          })
+        });
+        const res = await resp.json();
+
+        if (resp.ok && res.success) {
+          setAuthTab('login');
+          const loginEmailInput = document.getElementById('loginEmail');
+          if (loginEmailInput) loginEmailInput.value = pendingAuthEmail;
+          const loginPasswordInput = document.getElementById('loginPassword');
+          if (loginPasswordInput) {
+            loginPasswordInput.value = "";
+            setTimeout(() => loginPasswordInput.focus(), 80);
+          }
+          showAuthAlert(res.message || "Password updated successfully! Please log in with your new password.", "success");
+        } else {
+          showAuthAlert(res.detail || res.message || "Password update failed. Please check the code and try again.");
+        }
+      } catch (err) {
+        showAuthAlert("Network error: " + err.message);
+      } finally {
+        if (btn) {
+          btn.innerHTML = oldBtnHtml;
+          btn.disabled = false;
+        }
+      }
+    });
+
+    // Resend Reset Code Button
+    document.getElementById('btnResendResetOtp')?.addEventListener('click', async () => {
+      if (!pendingAuthEmail) {
+        showAuthAlert("Please provide your email address first.");
+        return;
+      }
+      try {
+        const resp = await _nativeFetch(apiUrl('/api/auth/forgot-password/request'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: pendingAuthEmail })
+        });
+        const res = await resp.json();
+        if (resp.ok && res.success) {
+          showAuthAlert("A new reset code has been sent to your email inbox.", "success");
+        } else {
+          showAuthAlert(res.detail || "Unable to resend code right now.");
+        }
+      } catch (err) {
+        showAuthAlert("Error resending reset code: " + err.message);
+      }
+    });
+
+    // Toolbar Logout Button
+    document.getElementById('btnNavLogout')?.addEventListener('click', () => {
+      handleAuthLogout(true);
+    });
+
+    // Toolbar Admin Panel Button
+    document.getElementById('btnNavAdmin')?.addEventListener('click', () => {
+      openAdminPanel();
+    });
+
+    // Admin Back To Dashboard from Workspace
+    document.getElementById('btnAdminBackToDash')?.addEventListener('click', () => {
+      openAdminPanel();
+    });
+
+    // Admin Panel Actions
+    document.getElementById('btnAdminBackToStudio')?.addEventListener('click', () => {
+      closeAdminPanel();
+    });
+
+    document.getElementById('btnAdminRefresh')?.addEventListener('click', () => {
+      loadAdminDashboard();
+      showToast("Administrator dashboard data refreshed.");
+    });
+
+    // Admin Search Filter
+    document.getElementById('adminUserSearchInput')?.addEventListener('input', (e) => {
+      const q = (e.target.value || '').toLowerCase().trim();
+      if (!adminUsersCache || adminUsersCache.length === 0) return;
+      if (!q) {
+        renderAdminUsersTable(adminUsersCache);
+      } else {
+        const filtered = adminUsersCache.filter(u => {
+          return (u.name && u.name.toLowerCase().includes(q)) ||
+                 (u.email && u.email.toLowerCase().includes(q)) ||
+                 (u.organization && u.organization.toLowerCase().includes(q)) ||
+                 (u.phone && u.phone.includes(q)) ||
+                 (u.role && u.role.toLowerCase().includes(q));
+        });
+        renderAdminUsersTable(filtered);
+      }
+    });
+
+    // Admin User Reports Modal Close & Outside Click
+    document.getElementById('btnCloseAdminUserModal')?.addEventListener('click', () => {
+      const m = document.getElementById('adminUserModal');
+      if (m) m.style.display = 'none';
+    });
+    document.getElementById('btnCloseAdminUserModalBtn')?.addEventListener('click', () => {
+      const m = document.getElementById('adminUserModal');
+      if (m) m.style.display = 'none';
+    });
+    document.getElementById('adminUserModal')?.addEventListener('click', (e) => {
+      if (e.target.id === 'adminUserModal') {
+        const m = document.getElementById('adminUserModal');
+        if (m) m.style.display = 'none';
+      }
+    });
+
+    // Admin Delete Inspector Confirmation Pop Card Listeners
+    document.getElementById('btnCloseDeleteUserModal')?.addEventListener('click', hideDeleteConfirmModal);
+    document.getElementById('btnCancelDeleteUser')?.addEventListener('click', hideDeleteConfirmModal);
+    document.getElementById('adminDeleteUserModal')?.addEventListener('click', (e) => {
+      if (e.target.id === 'adminDeleteUserModal') hideDeleteConfirmModal();
+    });
+
+    document.getElementById('btnConfirmDeleteUser')?.addEventListener('click', async () => {
+      if (!pendingDeleteUser) return;
+      const btn = document.getElementById('btnConfirmDeleteUser');
+      const oldHtml = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.innerHTML = `<span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;margin-right:6px;"></span> Deleting...`;
+        btn.disabled = true;
+      }
+      try {
+        const token = State.authToken || localStorage.getItem("hzf_auth_token");
+        const resp = await fetch(apiUrl(`/api/admin/users/${pendingDeleteUser.id}`), {
+          method: "DELETE",
+          headers: token ? { "Authorization": `Bearer ${token}` } : {}
+        });
+        const res = await resp.json();
+        if (resp.ok && res.success) {
+          hideDeleteConfirmModal();
+          // Also hide adminUserModal if it was currently showing this user
+          const userModal = document.getElementById('adminUserModal');
+          if (userModal) userModal.style.display = 'none';
+          showToast("Inspector account deleted successfully.");
+          loadAdminDashboard();
+        } else {
+          alert(res.detail || "Failed to delete user.");
+          if (btn) {
+            btn.innerHTML = oldHtml;
+            btn.disabled = false;
+          }
+        }
+      } catch (e) {
+        alert("Error: " + e.message);
+        if (btn) {
+          btn.innerHTML = oldHtml;
+          btn.disabled = false;
+        }
+      }
+    });
+
+    // Admin Deactivate/Activate Inspector Modal Listeners
+    document.getElementById('btnCloseToggleStatusModal')?.addEventListener('click', hideToggleStatusModal);
+    document.getElementById('btnCancelToggleStatus')?.addEventListener('click', hideToggleStatusModal);
+    document.getElementById('adminToggleStatusModal')?.addEventListener('click', (e) => {
+      if (e.target.id === 'adminToggleStatusModal') hideToggleStatusModal();
+    });
+
+    document.getElementById('btnConfirmToggleStatus')?.addEventListener('click', async () => {
+      if (!pendingToggleUser) return;
+      const targetUser = pendingToggleUser;
+      const targetId = targetUser.id;
+      const btn = document.getElementById('btnConfirmToggleStatus');
+      const oldHtml = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.innerHTML = `<span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;margin-right:6px;"></span> Updating...`;
+        btn.disabled = true;
+      }
+      try {
+        const token = State.authToken || localStorage.getItem("hzf_auth_token");
+        const resp = await fetch(apiUrl(`/api/admin/users/${targetId}/toggle-status`), {
+          method: "POST",
+          headers: token ? { "Authorization": `Bearer ${token}` } : {}
+        });
+        const res = await resp.json();
+        if (resp.ok && res.success) {
+          const newActive = !!res.isActive;
+
+          // Update local cache
+          const cached = adminUsersCache.find(u => String(u.id) === String(targetId));
+          if (cached) {
+            cached.isActive = newActive;
+            cached.is_active = newActive;
+          }
+
+          const reopenUserModal = wasAdminUserModalOpenForToggle;
+          hideToggleStatusModal();
+          showToast(res.message || "Inspector status updated.");
+
+          if (reopenUserModal) {
+            openAdminUserModal(targetId);
+          }
+
+          loadAdminDashboard();
+        } else {
+          showToast(res.detail || "Failed to update inspector status.", "error");
+          if (btn) {
+            btn.innerHTML = oldHtml;
+            btn.disabled = false;
+          }
+        }
+      } catch (e) {
+        showToast("Error: " + e.message, "error");
+        if (btn) {
+          btn.innerHTML = oldHtml;
+          btn.disabled = false;
+        }
+      }
+    });
+
+    // Check Authentication Session on Startup
+    await checkAuthSession();
+
     // Wire up Confirmation Leave Modal
     const confirmModal = document.getElementById('confirmLeaveModal');
     document.getElementById('btnCloseConfirmLeave')?.addEventListener('click', hideConfirmLeaveModal);
@@ -3419,6 +5406,10 @@
     const brandBtn = document.getElementById('brandHomeBtn');
     if (brandBtn) {
       brandBtn.addEventListener('click', () => {
+        if (State.currentUser && State.currentUser.role === 'admin') {
+          openAdminPanel();
+          return;
+        }
         if (State.isInspectionActive) {
           goBackHome();
         }
@@ -3509,11 +5500,15 @@
     }
 
     if (!sessionRestored) {
-      // Clean start on Welcome Screen
+      // Clean start on Welcome Screen (for inspectors) or Admin Panel (for admin)
       if (window.location.hash === '#workspace') {
         history.replaceState({ view: 'home' }, '', window.location.pathname + window.location.search);
       }
-      setWorkspaceActive(false, false);
+      if (State.currentUser && State.currentUser.role === 'admin') {
+        openAdminPanel();
+      } else {
+        setWorkspaceActive(false, false);
+      }
     }
 
     // Build New Inspection / Start Blank Inspection triggers
@@ -3927,11 +5922,12 @@
 
     document.getElementById('btnSavePhotoCaption')?.addEventListener('click', () => {
       if (!State.activePhotoTarget) return;
-      const { secId, itemId, photoIdx } = State.activePhotoTarget;
+      const { secId, itemId } = State.activePhotoTarget;
+      const pIdx = State.activePhotoTarget.pIdx !== undefined ? State.activePhotoTarget.pIdx : State.activePhotoTarget.photoIdx;
       const sec = State.sections.find(s => s.id === secId);
       const it = sec?.items.find(i => i.id === itemId);
-      if (it && it.photos[photoIdx]) {
-        it.photos[photoIdx].caption = document.getElementById('photoModalCaption')?.value.trim() || '';
+      if (it && it.photos && it.photos[pIdx]) {
+        it.photos[pIdx].caption = document.getElementById('photoModalCaption')?.value.trim() || '';
         State.isDirty = true;
         renderItems();
         renderReport();
@@ -3943,11 +5939,12 @@
 
     document.getElementById('btnDeletePhoto')?.addEventListener('click', () => {
       if (!State.activePhotoTarget) return;
-      const { secId, itemId, photoIdx } = State.activePhotoTarget;
+      const { secId, itemId } = State.activePhotoTarget;
+      const pIdx = State.activePhotoTarget.pIdx !== undefined ? State.activePhotoTarget.pIdx : State.activePhotoTarget.photoIdx;
       const sec = State.sections.find(s => s.id === secId);
       const it = sec?.items.find(i => i.id === itemId);
-      if (it && it.photos) {
-        it.photos.splice(photoIdx, 1);
+      if (it && it.photos && it.photos[pIdx]) {
+        it.photos.splice(pIdx, 1);
         State.isDirty = true;
         renderItems();
         renderReport();
@@ -3956,6 +5953,143 @@
       }
       if (photoModal) photoModal.style.display = 'none';
     });
+
+    document.getElementById('btnCropExistingPhoto')?.addEventListener('click', () => {
+      if (!State.activePhotoTarget) return;
+      const { secId, itemId } = State.activePhotoTarget;
+      const pIdx = State.activePhotoTarget.pIdx !== undefined ? State.activePhotoTarget.pIdx : State.activePhotoTarget.photoIdx;
+      const sec = State.sections.find(s => s.id === secId);
+      const it = sec?.items.find(i => i.id === itemId);
+      const photo = it?.photos?.[pIdx];
+      if (!photo) return;
+      if (photoModal) photoModal.style.display = 'none';
+      openLiveCameraModal(secId, itemId, pIdx, photo.dataUrl, photo.caption);
+    });
+
+    // Live Camera & Photo Crop Modal Event Listeners
+    document.getElementById('btnCloseLiveCameraModal')?.addEventListener('click', closeLiveCameraModal);
+    document.getElementById('btnCancelLiveCamera')?.addEventListener('click', closeLiveCameraModal);
+    document.getElementById('liveCameraModal')?.addEventListener('click', (e) => {
+      if (e.target.id === 'liveCameraModal') closeLiveCameraModal();
+    });
+
+    // Shutter button (snap live frame)
+    document.getElementById('btnShutterCapture')?.addEventListener('click', () => {
+      const video = document.getElementById('liveCameraVideo');
+      if (!video || !video.videoWidth) {
+        document.getElementById('liveCameraNativeAppInput')?.click();
+        return;
+      }
+      const c = document.createElement('canvas');
+      c.width = video.videoWidth;
+      c.height = video.videoHeight;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(video, 0, 0, c.width, c.height);
+      const dataUrl = c.toDataURL('image/jpeg', 0.95);
+      showCameraCropView(dataUrl);
+    });
+
+    // Flip Camera button
+    document.getElementById('btnFlipCamera')?.addEventListener('click', async () => {
+      currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+      await startCameraStream();
+    });
+
+    // Fallback file pickers
+    document.getElementById('btnCameraUploadFallback')?.addEventListener('click', () => {
+      document.getElementById('liveCameraFileInput')?.click();
+    });
+    document.getElementById('btnCameraNativeApp')?.addEventListener('click', () => {
+      document.getElementById('liveCameraNativeAppInput')?.click();
+    });
+
+    document.getElementById('liveCameraFileInput')?.addEventListener('change', function () {
+      const file = this.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => showCameraCropView(e.target.result);
+      reader.readAsDataURL(file);
+      this.value = '';
+    });
+
+    document.getElementById('liveCameraNativeAppInput')?.addEventListener('change', function () {
+      const file = this.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => showCameraCropView(e.target.result);
+      reader.readAsDataURL(file);
+      this.value = '';
+    });
+
+    // Crop actions
+    document.getElementById('btnRetakeFromCrop')?.addEventListener('click', async () => {
+      showCameraViewfinder();
+      await startCameraStream();
+    });
+
+    document.getElementById('btnRotateCropCw')?.addEventListener('click', () => {
+      cropRotation = (cropRotation + 90) % 360;
+      cropState.rect = null;
+      setupAndDrawCropCanvas();
+    });
+
+    document.getElementById('btnRotateCropCcw')?.addEventListener('click', () => {
+      cropRotation = (cropRotation + 270) % 360;
+      cropState.rect = null;
+      setupAndDrawCropCanvas();
+    });
+
+    document.getElementById('btnResetCrop')?.addEventListener('click', () => {
+      cropState.rect = null;
+      setupAndDrawCropCanvas();
+    });
+
+    // Aspect ratio selector buttons
+    document.querySelectorAll('.btn-crop-ratio').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.btn-crop-ratio').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const ratio = btn.getAttribute('data-ratio');
+        if (ratio === '4/3') cropAspect = 4 / 3;
+        else if (ratio === '16/9') cropAspect = 16 / 9;
+        else if (ratio === '1/1') cropAspect = 1;
+        else cropAspect = 'free';
+        cropState.rect = null;
+        setupAndDrawCropCanvas();
+      });
+    });
+
+    // Confirm & Add Photo
+    document.getElementById('btnConfirmPhotoCrop')?.addEventListener('click', saveCroppedPhotoToItem);
+
+    // Canvas Pointer & Touch dragging
+    const cropCanvas = document.getElementById('cropCanvas');
+    if (cropCanvas) {
+      cropCanvas.addEventListener('mousedown', (e) => {
+        const pos = getCanvasTouchPos(cropCanvas, e);
+        handleCropPointerDown(pos);
+      });
+      window.addEventListener('mousemove', (e) => {
+        if (!cropState.isDragging && e.target !== cropCanvas) return;
+        const pos = getCanvasTouchPos(cropCanvas, e);
+        handleCropPointerMove(pos, cropCanvas);
+      });
+      window.addEventListener('mouseup', handleCropPointerUp);
+
+      // Touch support for mobile devices
+      cropCanvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const pos = getCanvasTouchPos(cropCanvas, e);
+        handleCropPointerDown(pos);
+      }, { passive: false });
+      cropCanvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        const pos = getCanvasTouchPos(cropCanvas, e);
+        handleCropPointerMove(pos, cropCanvas);
+      }, { passive: false });
+      cropCanvas.addEventListener('touchend', handleCropPointerUp);
+      cropCanvas.addEventListener('touchcancel', handleCropPointerUp);
+    }
 
     // Automation & AI Modal Event Listeners
     checkAiConnection();
